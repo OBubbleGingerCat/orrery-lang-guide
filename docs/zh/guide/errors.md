@@ -88,6 +88,6 @@ for warning in plan.analysis().warnings() {
 
 - **单步运行。** `sim.step()` 运行一个时刻点；`sim.next_timepoint()` 给出是哪个。在两步之间用 `sim.state(handle)` 查看状态。
 - **检查运行。** 用 `SimConfig { checks: true, .. }` 时，运行之后 `sim.check_trace()` 检查访问同一份状态、其中至少一个是写的每两次访问都按串行顺序运行了。
-- **比较不同的 worker 数。** 结果，包括报出的错误，从不取决于 worker 数。如果一个模型在不同的 worker 数下给出不同的结果，那是 Orrery 的 bug，请报告。
+- **比较不同的 worker 数。** 结果，包括报出的错误，从不取决于 worker 数。如果一个模型在不同的 worker 数下给出不同的结果，那是 Orrery 的 bug。
 - **快照与恢复。** 在长时间的运行中拍快照，恢复到问题之前的那一个，再用 `step`
   循环或更多的日志排查（[快照](./snapshots)）。

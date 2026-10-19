@@ -115,7 +115,7 @@ later `run_until` and `step` returns an error.
   same state, at least one of them a write, ran in serial order.
 - **Compare worker counts.** Results, errors included, never depend on
   the number of workers. A model that gives other results on another
-  number of workers is a bug in Orrery; please report it.
+  number of workers is a bug in Orrery.
 - **Snapshot and restore.** Take snapshots in a long run and restore the
   one before the problem, with a `step` loop or more logging
   ([Snapshots](./snapshots)).
