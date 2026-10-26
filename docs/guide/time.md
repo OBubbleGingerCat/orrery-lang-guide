@@ -197,6 +197,14 @@ A gate, its triggers and the task that writes it belong together:
 
 The macros and the plan check these.
 
+The `&mut orr::Gate` a task takes is the gate itself, for the call. A gate
+moved out of it, with `std::mem::take` or `std::mem::swap`, is still the
+gate until the call returns. Kept past that, it is a gate of its own, like
+`orr::Gate::default()`: writing it changes nothing in the simulation,
+`is_open()` and `opens()` read its own value, and `gated_edges()` panics.
+The host's `&mut orr::Gate` from `sim.state_mut` is the same, until what
+`state_mut` returned is dropped or the simulation is next used.
+
 Between runs, `sim.state_mut(handle)` gives the host the gate; what it
 writes takes effect when the next run starts. `sim.gated_edges(handle)`
 reads the counts. `sim.dropped_events()` lists the dropped events per

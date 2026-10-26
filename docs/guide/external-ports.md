@@ -60,7 +60,7 @@ the simulation, with `into_sim_with`:
 
 ```rust
 let plan = orr::SimPlan::<Monitor>::new(None, None)?;
-let mut sim = plan.into_sim_with(orr::SimConfig::default(), |top, ports| {
+let mut sim = plan.into_sim_with(orr::SimConfig::default(), None, |top, ports| {
     ports.bind(top.log, Log::default())
 })?;
 sim.run_until(orr::Time::ns(2))?;

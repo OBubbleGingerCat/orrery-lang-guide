@@ -127,7 +127,7 @@ task cannot run both before and after the writer.
 | `ctx.module()` | the module's view: parameters as values (`*ctx.module().step`) |
 | `ctx.now()` | the current `orr::Timepoint` (`.ps()`, `.delta()`, displayed as `10ns` or `10ns+1`) |
 | `ctx.triggered_triggers()` | a tuple, one slot per `triggers` entry: `Option<&P>` for a field, `&[Option<&P>]` for an array; a clock's payload is its `ClockInfo` |
-| `ctx.emit_triggers()` | a tuple, one emitter per `emits` entry: an `EventEmitter`, or a `Vec` of them for an array |
+| `ctx.emit_triggers()` | a tuple, one emitter per `emits` entry: an `orr::EventEmitter`, or an `orr::EventEmitters` for an array |
 
 ```rust
 let (clock, inputs) = ctx.triggered_triggers();
@@ -135,8 +135,18 @@ for packet in inputs.iter().flatten() {
     // every packet that arrived on any input this timepoint
 }
 let outputs = &mut ctx.emit_triggers().0;
-outputs[port].emit(packet, link_delay)?;
+outputs[port].emit(packet, link_delay)?; // one element, by index
+for (i, mut output) in outputs.iter().enumerate() {
+    output.emit(i as u32, orr::Time::ns(i as u64 + 1))?; // every element
+}
+if let Some(mut output) = outputs.get(9) {
+    output.emit(packet, link_delay)?; // `None`: there is no element 9
+}
 ```
+
+An `EventEmitters` gives element *i*'s emitter as `outputs[i]`, which
+panics past the end, or as `outputs.get(i)`, which gives `None` there;
+`iter()` gives each element's in order, and `len()` how many there are.
 
 Emitters and payloads are borrowed for the call only. Sending events is
 described in [Time](./time#events).

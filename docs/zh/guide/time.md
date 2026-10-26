@@ -145,4 +145,6 @@ fn step(
 
 宏和计划会检查这些规则。
 
+task 取得的 `&mut orr::Gate` 在这次调用期间就是门控本身。用 `std::mem::take` 或 `std::mem::swap` 从里面移出来的门控，在调用返回之前仍然是这个门控；留到调用以后，它就是一个独立的门控，和 `orr::Gate::default()` 一样：写它不改变仿真里的任何东西，`is_open()` 和 `opens()` 读它自己的值，`gated_edges()` 会 panic。宿主从 `sim.state_mut` 得到的 `&mut orr::Gate` 也一样，直到 `state_mut` 返回的访问器被丢弃，或者仿真下一次被使用。
+
 两次运行之间，宿主通过 `sim.state_mut(handle)` 取得门控；它写入的值在下一次运行开始时生效。`sim.gated_edges(handle)` 读取计数。`sim.dropped_events()` 按实例、task 和触发端口列出丢弃的事件，如果有丢弃，仿真被丢弃时会打印一条警告；设了 `SimConfig::fail_on_drop`，第一个被丢弃的事件就是错误，它所在的时刻点一个 task 也不运行。快照带上门控、丢弃事件的计数和被门控的沿，所以恢复后的运行接着计数。

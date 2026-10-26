@@ -10,7 +10,7 @@ use orrery_lang as orr;
 let config = orr::SimConfig {
     snapshots: Some(orr::SnapshotConfig::new(
         orr::SnapshotEvery::Time(orr::Time::us(100)),
-        "snapshots".into(),
+        "snapshots",
     )),
     ..orr::SimConfig::default()
 };
@@ -70,6 +70,8 @@ worker 数或不同的配置；它会与原来的运行完全一样地继续下�
 - 恢复之后、第一次运行之前用 `state_mut` 写状态，等同于在原来的运行里、前一次运行恰好停在边界之前时，在两次运行之间写它。
 
 唯一的例外是发往不触发任何 task 的事件源的在途事件：它不保存，所以恢复以后不再参与多驱动和 `event_capacity` 的计算。
+
+记下事件的恢复后的仿真在构建时装 sink（[事件日志](./running#event-log)）。
 
 恢复后的仿真在第一次运行之前，`now()` 是 `None`；`next_timepoint()` 已经给出下一个时刻点。
 

@@ -113,7 +113,7 @@ fn tick(_ctx: &mut orr::TaskCtx,
 | `ctx.module()` | 模块的视图：参数是值（`*ctx.module().step`） |
 | `ctx.now()` | 当前的 `orr::Timepoint`（`.ps()`、`.delta()`，显示为 `10ns` 或 `10ns+1`） |
 | `ctx.triggered_triggers()` | 一个元组，每个 `triggers` 项一个槽位：字段是 `Option<&P>`，数组是 `&[Option<&P>]`；时钟的载荷是它的 `ClockInfo` |
-| `ctx.emit_triggers()` | 一个元组，每个 `emits` 项一个发送器：一个 `EventEmitter`，数组则是由它们组成的 `Vec` |
+| `ctx.emit_triggers()` | 一个元组，每个 `emits` 项一个发送器：一个 `orr::EventEmitter`，数组则是一个 `orr::EventEmitters` |
 
 ```rust
 let (clock, inputs) = ctx.triggered_triggers();
@@ -121,8 +121,16 @@ for packet in inputs.iter().flatten() {
     // 这个时刻点在任一输入上到达的每个包
 }
 let outputs = &mut ctx.emit_triggers().0;
-outputs[port].emit(packet, link_delay)?;
+outputs[port].emit(packet, link_delay)?; // 按下标取一个元素
+for (i, mut output) in outputs.iter().enumerate() {
+    output.emit(i as u32, orr::Time::ns(i as u64 + 1))?; // 每个元素
+}
+if let Some(mut output) = outputs.get(9) {
+    output.emit(packet, link_delay)?; // `None`：没有第 9 个元素
+}
 ```
+
+`EventEmitters` 用 `outputs[i]` 给出第 *i* 个元素的发送器，越界时 panic；用 `outputs.get(i)` 则越界时给出 `None`。`iter()` 按顺序给出每个元素的发送器，`len()` 给出元素个数。
 
 发送器和载荷只在这次调用期间借用。发送事件见[时间](./time#events)。
 

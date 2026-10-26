@@ -12,7 +12,7 @@ use orrery_lang as orr;
 let config = orr::SimConfig {
     snapshots: Some(orr::SnapshotConfig::new(
         orr::SnapshotEvery::Time(orr::Time::us(100)),
-        "snapshots".into(),
+        "snapshots",
     )),
     ..orr::SimConfig::default()
 };
@@ -102,6 +102,9 @@ would have:
 The one exception is an event in flight on a source that triggers no
 task: it is not saved, so after a restore it no longer counts towards a
 multi-drive or `event_capacity`.
+
+A restored simulation that logs its events takes its sink as it is built
+([Event log](./running#event-log)).
 
 Until its first run, a restored simulation's `now()` is `None`;
 `next_timepoint()` already gives the next timepoint.
