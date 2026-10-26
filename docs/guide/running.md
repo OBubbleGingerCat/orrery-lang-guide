@@ -35,11 +35,11 @@ let mut sim = plan.into_sim(orr::SimConfig::default())?;
 | `snapshots` | `None` | when and where to take [snapshots](./snapshots) |
 | `skip_closed` | `Some(64)` | pass over a stretch of at least this many clock edges at which every gated clock is closed and nothing else happens in one go; `None` passes over them one at a time |
 | `lead_limit` | `Some(256)` | how far parts of the model may run ahead of the parts they send events to, which bounds the events in flight and the memory they take; at least 1, `None` for no bound |
-| `wait` | `orr::exec::Adaptive` | how an idle worker waits for work: `Adaptive` spins, then yields, then sleeps; `AlwaysSpin` suits a machine the simulation has to itself, `AlwaysPark` more workers than free cores |
+| `wait` | `orr::exec::Adaptive` | how quickly workers answer against the CPU they hold while they have nothing to run: `Adaptive` answers fast and frees its core when idle for long; `AlwaysSpin` suits a machine the simulation has to itself, `AlwaysPark` more workers than free cores |
 | `placement` | `orr::plan::Measured` | how the model is laid out on the workers; `Measured` measures the run to decide |
 | `pin` | `orr::exec::NoPin` | which CPUs the workers run on: `NoPin` leaves it to the OS; `CacheDomain` keeps them on as many physical cores as there are workers, nearest the calling thread's |
 | `topology` | `None` | the CPUs `pin` chooses from; `None` reads this machine's |
-| `steal` | `orr::exec::DomainSteal` | which other workers an idle worker takes work from: `DomainSteal` those that share a cache with it, `FlatSteal` any, `NoSteal` none |
+| `steal` | `orr::exec::DomainSteal` | which workers share work: `DomainSteal` those that share a cache, `FlatSteal` all of them, `NoSteal` none |
 | `job_log` | `None` | a directory where each worker writes a record of its work, for performance analysis |
 | `account` | `false` | keep an account of where the workers' CPU time goes, read with `sim.account()` |
 

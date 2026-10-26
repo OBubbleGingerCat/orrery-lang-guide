@@ -29,11 +29,11 @@ let mut sim = plan.into_sim(orr::SimConfig::default())?;
 | `snapshots` | `None` | 何时、在哪里拍[快照](./snapshots) |
 | `skip_closed` | `Some(64)` | 连续至少这么多个时钟沿上所有受门控的时钟都关着、也没有别的事发生时，一次越过它们；`None` 逐个越过 |
 | `lead_limit` | `Some(256)` | 模型的各部分最多能比它们发事件去的部分领先多远，由此限制在途事件的数量和它们占的内存；至少为 1，`None` 不设上限 |
-| `wait` | `orr::exec::Adaptive` | 空闲的 worker 怎样等待工作：`Adaptive` 先自旋、再让出、最后睡眠；`AlwaysSpin` 适合仿真独占的机器，`AlwaysPark` 适合 worker 多于空闲核的情况 |
+| `wait` | `orr::exec::Adaptive` | 没东西可跑的时候，worker 在响应快慢和占着的 CPU 之间怎么取舍：`Adaptive` 响应快，闲得久了就让出核；`AlwaysSpin` 适合仿真独占的机器，`AlwaysPark` 适合 worker 多于空闲核的情况 |
 | `placement` | `orr::plan::Measured` | 模型怎样分布到各个 worker 上；`Measured` 测量运行来决定 |
 | `pin` | `orr::exec::NoPin` | worker 在哪些 CPU 上运行：`NoPin` 交给操作系统；`CacheDomain` 把它们限制在和 worker 数一样多的物理核上，离调用线程最近的优先 |
 | `topology` | `None` | `pin` 从中挑选的 CPU；`None` 读取本机的 |
-| `steal` | `orr::exec::DomainSteal` | 空闲的 worker 从哪些别的 worker 那里取工作：`DomainSteal` 取与它共享缓存的，`FlatSteal` 取任意的，`NoSteal` 不取 |
+| `steal` | `orr::exec::DomainSteal` | 哪些 worker 之间分担工作：`DomainSteal` 共享缓存的那些，`FlatSteal` 全部，`NoSteal` 不分担 |
 | `job_log` | `None` | 每个 worker 把自己做的工作记录写进这个目录，用于性能分析 |
 | `account` | `false` | 记下 worker 的 CPU 时间花在哪里，用 `sim.account()` 读取 |
 
