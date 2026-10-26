@@ -19,7 +19,7 @@ let mut sim = plan.into_sim(orr::SimConfig::default())?;
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `workers` | 1 | 执行 task 的线程数；放置策略可能用得更少 |
+| `workers` | 1 | 执行 task 的线程数；放置策略可能用得更少；多于一个、又装了[事件日志](#event-log)时，另有一个线程写日志（[线程](#threads)） |
 | `overlap` | `true` | 在模型允许的地方，前面的时刻点还在运行时就开始后面的；`false` 一次只运行一个时刻点，用于测试 |
 | `checks` | `false` | 记下 task 访问状态的先后，供 `sim.check_trace()` 检查；慢，用于测试 |
 | `delta_limit` | 30 | 同一个物理时间上 delta 周期数的上限，最大 65,534；设得越大，一次运行在时间上能走得越短（[delta 周期](./time#delta-cycles)） |
@@ -199,6 +199,10 @@ let plan = orr::SimPlan::<Top>::new(params, Some(latest))?;
 let log = orr::EventLogFile::create("restored.log")?;
 let mut sim = plan.into_sim_with(config, Some(Box::new(log)), |_, _| Ok(()))?;
 ```
+
+### 线程 {#threads}
+
+一个 worker 时，sink 在调用 `run_until` 的线程上调用。多个 worker 时，仿真另起一个线程来调用 sink：8 个 worker 加 sink 共 9 个线程。给这个线程一个单独的核，和每个 worker 一样。核不够时（写日志的线程和某个 worker 共用一个核，或者这些核上还有别的负载），仿真照样能结束，结果也相同，但可能变慢。
 
 ### orr-events
 

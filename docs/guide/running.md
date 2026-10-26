@@ -25,7 +25,7 @@ let mut sim = plan.into_sim(orr::SimConfig::default())?;
 
 | Field | Default | Meaning |
 |---|---|---|
-| `workers` | 1 | the threads that run the tasks; the placement may use fewer |
+| `workers` | 1 | the threads that run the tasks; the placement may use fewer; with more than one and an [event log](#event-log), one more runs the log ([Threads](#threads)) |
 | `overlap` | `true` | start later timepoints while earlier ones still run, where the model allows it; `false` runs one timepoint at a time, for tests |
 | `checks` | `false` | record the order in which tasks access state, for `sim.check_trace()`; slow, for tests |
 | `delta_limit` | 30 | the most delta cycles at one physical time, at most 65,534; a larger one shortens how far in time a run reaches ([Delta cycles](./time#delta-cycles)) |
@@ -257,6 +257,15 @@ let plan = orr::SimPlan::<Top>::new(params, Some(latest))?;
 let log = orr::EventLogFile::create("restored.log")?;
 let mut sim = plan.into_sim_with(config, Some(Box::new(log)), |_, _| Ok(()))?;
 ```
+
+### Threads {#threads}
+
+With one worker, the sink is called on the thread that calls `run_until`.
+With more, the simulation runs one more thread, which calls the sink: 8
+workers and a sink make 9 threads. Give that thread a core of its own, as
+each worker has. On fewer cores, the logging thread sharing one with a
+worker or other work running on them, the simulation still ends and its
+results are the same, but it may run slower.
 
 ### orr-events
 
