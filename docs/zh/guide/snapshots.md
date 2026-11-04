@@ -54,7 +54,7 @@ for until in [30, 60, 90, 100] {
 }
 ```
 
-## 恢复
+## 恢复 {#restoring}
 
 把最新的快照文件交给 `SimPlan::new`：
 
