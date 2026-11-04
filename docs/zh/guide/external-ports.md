@@ -112,6 +112,8 @@ impl orr::ExternalSource for Trace {
 
     fn restore(&mut self, saved: &[u8]) -> Result<(), orr::plain::Error> {
         // 从 `saved` 读回位置
+        let bytes = saved.try_into().map_err(|_| orr::plain::Error::new("a position is 8 bytes"))?;
+        self.position = u64::from_le_bytes(bytes);
         Ok(())
     }
 }
