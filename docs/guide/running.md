@@ -106,7 +106,7 @@ from where the first stopped, and gives the same result as running to
 2 µs at once. A run reaches about 288 s of simulated time at most: a
 `run_until` past that, or to a time that is not physical, fails with
 `RunError::Request`, runs nothing, and leaves the simulation to go on
-([Time](./time#the-time-type)).
+([Time](./time#delta-cycles)).
 
 `sim.step()` runs exactly the next timepoint and returns
 `StepEnd::Executed(timepoint)`, `StepEnd::Finished(..)` or

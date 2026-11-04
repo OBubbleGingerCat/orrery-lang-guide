@@ -2,23 +2,27 @@
 
 ## Time and timepoints
 
-`orr::Time` is a physical time in integer picoseconds, or `Time::DELTA`,
+`orr::Time` is a physical time in integer femtoseconds, or `Time::DELTA`,
 one delta cycle:
 
 ```rust
 use orrery_lang as orr;
 
-orr::Time::ns(10)        // also ps, us, ms, s
-orr::Time::from_ps(425)
-orr::Time::DELTA
+let period = orr::Time::ns(10); // also fs, ps, us, ms, s
+let link = orr::Time::from_ps(425);
+let next = orr::Time::DELTA;
 ```
 
 It has no arithmetic or ordering of its own; compare and add through
-`as_ps()`, which is `None` for `DELTA`. In parameter files a time is a
-string: `"10ns"`, `"250 ps"`, `"delta"`.
+`as_fs()`, which is `None` for `DELTA`. `from_ps` and `as_ps()` work in
+whole picoseconds: `as_ps()` drops any part of a picosecond. A time is
+displayed in the largest unit that keeps it exact: `10ns`, `1500ps`,
+`1500fs`. In parameter files a time is a string: `"10ns"`, `"250 ps"`,
+`"1500fs"`, `"delta"`.
 
 A **timepoint** is a physical time plus a delta cycle, ordered by time and
-then delta, and displayed as `10ns` or `10ns+1`. Clocks fire at delta 0;
+then delta, and displayed as `10ns` or `10ns+1`. `Timepoint::at(ps)` and
+`Timepoint::at_fs(fs)` make one at delta 0. Clocks fire at delta 0;
 an event sent with `DELTA` arrives at the next delta of the same time; an
 event sent with a physical delay arrives at delta 0 of that later time.
 Timepoints run strictly in order: everything at `10ns`, then everything at
@@ -28,27 +32,45 @@ Timepoints run strictly in order: everything at `10ns`, then everything at
 
 An independent clock is an `orr::Clock` field, configured once in `init`
 with a period and a phase (the time of its first edge, less than the
-period):
+period), or with a frequency in hertz and a phase:
 
 ```rust
 ctx.init_clock(module.clock, orr::Time::ns(10), orr::Time::ps(0))?;
+ctx.init_clock_hz(module.core, 1_132_000_000, orr::Time::ps(0))?;
 ```
+
+A clock given by its frequency has a period of 10¹⁵ / *hz* fs, which need
+not be whole. Each edge is at its exact time rounded to the nearest
+femtosecond, so the edges never drift: at 1132 MHz they are at 0,
+883392 fs, 1766784 fs, 2650177 fs, and so on.
 
 Modules that receive a clock declare an `orr::ClockRelay` and are
 connected to it: `ctx.connect(module.clock, module.child.clock)?`. A task
-on a clock sees the clock's `ClockInfo` (period and phase) as its trigger
-payload.
+on a clock sees the clock's `orr::ClockInfo` as its trigger payload:
+
+- `period()` is the period as a fraction, `(num, den)` femtoseconds;
+  `interval()` the least gap between two edges; `phase()` the phase.
+- `cycle_of(now)` is the edge a timepoint falls on, counting the edge at
+  the phase as 1; `edge(cycle)` is the timepoint of an edge;
+  `is_edge(now)` and `edges_before(now)` say whether a timepoint is an
+  edge and how many come before it.
+
+An `init` reads a clock's `ClockInfo` with `ctx.clock_info(clock)`, and
+the host with `plan.clock_config(handle)`.
 
 **Several clock domains** are just several clocks. Their periods and
-phases are exact integers, so edges that should coincide do, forever. The
+phases are exact, so edges that should coincide do, forever. The
 GPGPU-Sim model runs its core at 1132 MHz and its DRAM at 850 MHz as
 periods of 425 and 566 picoseconds, which keeps the ratio between them
 exact.
 
 There is no limit on the number of clocks, or on how their periods
-combine. A clock's period and phase are fixed once `init` has set them; a
-unit whose frequency changes while it runs can trigger itself with events
-instead, sent each time with the period it keeps in its state.
+combine, but one: two clocks whose edges come within less than 1 fs of
+each other without meeting, such as one at 3 GHz and one with a period of
+333333 fs, fail the load (`LoadError::Init`, stage `clocks`). A clock's
+period and phase are fixed once `init` has set them; a unit whose
+frequency changes while it runs can trigger itself with events instead,
+sent each time with the period it keeps in its state.
 
 ## Events
 
@@ -93,11 +115,15 @@ pub hint: orr::EventSource<()>,
 ```
 
 A bound is a constant `orr::Time` or the name of a `Time` parameter of the
-module. Every emit is checked against it.
+module. Every emit is checked against it: an emit outside the bounds
+fails the run.
 
-**`min_delay` is what lets event-driven parts run in parallel.** Declare
-the real minimum latency of every link and port: declared minimums let
-Orrery run more of the model at once. They never change results.
+Declare the real minimum latency of every link and port. Declared
+minimums never change results. A minimum delay on a source used by a task
+that may stop the simulation also sets how long after a stop the
+simulation keeps running ([Stopping](./running#stopping)): a task that
+stops, and sends on a source with `min_delay` of 5 ns, gives a stop delay
+of 5 ns.
 
 `max_delay = Time::DELTA` says the event only ever arrives a delta cycle
 later, so it can never meet a clock edge: tasks it triggers never run in
@@ -105,21 +131,17 @@ the same timepoint as clocked ones. Conflicts between the two then cannot
 happen, and are neither reported as possible nor checked while the
 simulation runs.
 
-A minimum delay on a source used by a task that may stop the simulation
-also sets how long after a stop the simulation keeps running
-([Stopping](./running#stopping)).
-
 ## Delta cycles
 
 Delta cycles order things within one physical time: a chain of events,
 each sent with `DELTA`, runs as a sequence of timepoints at the same time.
 More than `delta_limit` delta cycles at one time (30 by default) is an
 error, which catches models that never settle. Set `SimConfig::delta_limit`
-for models that need longer chains, up to 65,534.
+for models that need longer chains, up to 62.
 
-The limit also sets how far in simulated time a run reaches: about 160
-hours at the default, 5 hours at 1000, 281 seconds at 65,534. A run that
-would go later fails with an error that names the limit.
+A run reaches about 288 seconds of simulated time, whatever the limit. A
+`run_until` past that fails with `RunError::Request` and runs nothing;
+the simulation goes on with a time it reaches.
 
 ## Clock gates
 
@@ -141,7 +163,7 @@ pub struct Sm {
 ```
 
 A gated trigger fires only while its gate is open. A clock edge at which
-the gate is closed does not run the task, and costs nothing; when every
+the gate is closed does not run the task; when every
 gated clock at an edge is closed and nothing else happens there, the edge
 is not a timepoint at all, and `sim.step()` passes over it. An event that
 arrives at a gated trigger while the gate is closed is dropped and
@@ -195,20 +217,85 @@ A gate, its triggers and the task that writes it belong together:
   share one gate;
 - only that task writes the gate; other tasks may read it.
 
-The macros and the plan check these.
+The macros and `SimPlan::new` check these. The gate a task takes stays
+in its call: `std::mem::take` and `std::mem::replace` on it do not
+compile.
 
-The `&mut orr::Gate` a task takes is the gate itself, for the call. A gate
-moved out of it, with `std::mem::take` or `std::mem::swap`, is still the
-gate until the call returns. Kept past that, it is a gate of its own, like
-`orr::Gate::default()`: writing it changes nothing in the simulation,
-`is_open()` and `opens()` read its own value, and `gated_edges()` panics.
-The host's `&mut orr::Gate` from `sim.state_mut` is the same, until what
-`state_mut` returned is dropped or the simulation is next used.
-
-Between runs, `sim.state_mut(handle)` gives the host the gate; what it
-writes takes effect when the next run starts. `sim.gated_edges(handle)`
-reads the counts. `sim.dropped_events()` lists the dropped events per
+Between runs, `sim.gate_mut(handle)` gives the host the gate:
+`open()`, `close()`, `close_until(t)`, `is_open()` and `opens()`. What it
+writes takes effect when the next run starts. `sim.state` and
+`sim.state_mut` do not take a gate. `sim.gated_edges(handle)` reads the
+counts. `sim.dropped_events()` lists the dropped events per
 instance, task and trigger, and dropping the simulation prints a warning
 if there were any; with `SimConfig::fail_on_drop` the first one is an
 error instead, and no task runs at its timepoint. Snapshots carry the gates, the dropped events and the
 gated edges, so a restored run continues the counts.
+
+## Wakes {#wakes}
+
+A task can open another module's gate without sending an event, by a
+**wake**. The sending module declares an `orr::Wake` field and lists it in
+its task's `wakes`; the receiving module declares an `orr::WakeRelay`
+that names the gate it opens; an `init` connects the two with
+`ctx.connect`:
+
+```rust
+#[orr::module]
+pub struct Unit {
+    #[orr::trigger(gate = gate)]
+    pub clock: orr::ClockRelay,
+    #[orr::wake(gate = gate)]
+    pub wake: orr::WakeRelay,
+    gate: orr::Gate,
+    pub runs: u64,
+}
+
+#[orr::module_impl]
+impl Unit {
+    #[orr::task(triggers = (clock,))]
+    fn step(_ctx: &mut orr::TaskCtx, gate: &mut orr::Gate, runs: &mut u64) -> Result<(), orr::SimError> {
+        *runs += 1;
+        gate.close(); // nothing to do until woken
+        Ok(())
+    }
+}
+
+#[orr::module]
+pub struct Feeder {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+    pub units: [orr::Wake; 2],
+}
+
+#[orr::module_impl]
+impl Feeder {
+    #[orr::task(triggers = (clock,), wakes = (units,))]
+    fn feed(ctx: &mut orr::TaskCtx) -> Result<(), orr::SimError> {
+        let clock = ctx.triggered_triggers().0.expect("runs on its clock");
+        let wakes = &ctx.wakes().0;
+        if clock.cycle_of(ctx.now()) % 4 == 0 {
+            wakes.wake(1); // from the next timepoint
+            wakes.wake_after(0, clock.interval())?; // from the next edge on
+        }
+        Ok(())
+    }
+}
+```
+
+```rust
+ctx.connect(module.feeder.units[i], unit.wake)?;
+```
+
+- `wake()` opens the gate from the next timepoint: the unit runs again
+  at its gated clock's first edge after now. `wake_after(delay)` opens it
+  from its first edge at or after now + `delay`, which is `DELTA` or a
+  positive physical time.
+- Several wakes of one gate at one timepoint are one, and a wake wins
+  over a `close()` by the gate's own task at the same timepoint.
+- `ctx.wakes()` has one entry per `wakes = (..)` entry: one wake, or, for
+  an array, `wake(i)`, `wake_after(i, delay)` and `len()`.
+- A `Wake` or a `WakeRelay` marked `#[orr::wake(forward)]` passes wakes
+  out of a submodule or in to one, as relays pass triggers.
+
+For now, a model whose tasks wake runs on one worker
+([Workers](./running#workers)).

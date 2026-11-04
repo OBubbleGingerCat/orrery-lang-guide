@@ -75,7 +75,7 @@ match sim.run_until(orr::Time::us(10))? {
 }
 ```
 
-运行可以分多次：先 `run_until(1 µs)`，再 `run_until(2 µs)`，第二次从第一次停下的地方继续，结果与一次跑到 2 µs 相同。一次运行最多走到约 288 s 的仿真时间：`run_until` 给的时间超过它，或者不是物理时间，就返回 `RunError::Request`，什么也不运行，仿真还可以继续（[时间](./time#the-time-type)）。
+运行可以分多次：先 `run_until(1 µs)`，再 `run_until(2 µs)`，第二次从第一次停下的地方继续，结果与一次跑到 2 µs 相同。一次运行最多走到约 288 s 的仿真时间：`run_until` 给的时间超过它，或者不是物理时间，就返回 `RunError::Request`，什么也不运行，仿真还可以继续（[时间](./time#delta-cycles)）。
 
 `sim.step()` 恰好运行下一个时刻点，返回 `StepEnd::Executed(timepoint)`、
 `StepEnd::Finished(..)`，或者在没有东西可运行时返回 `StepEnd::Idle`。
