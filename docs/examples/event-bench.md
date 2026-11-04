@@ -27,7 +27,7 @@ variant ends each lane in stages that the clock triggers too.
 ## Mesh
 
 A `width` × `height` mesh of routers. Each router's clock injects
-packets, a share of them to a hotspot so the load is uneven; packets go X
+packets, some of them to a hotspot so the load is uneven; packets go X
 then Y, one per output per cycle from per-output queues, over links that
 are events with a physical delay (2 ns by default). A variant adds a
 monitor that sums every router's counters on the clock and stops the
@@ -46,4 +46,6 @@ runs, the gated edges and a checksum.
 ## What it shows
 
 Every configuration prints a checksum, which every number of workers must
-agree on.
+agree on. For now, the lanes and the mesh, whose tasks send events, run on
+one worker; the gated units run on several
+([Workers](../guide/running#workers)).
