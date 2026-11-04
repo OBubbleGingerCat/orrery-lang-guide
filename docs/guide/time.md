@@ -119,11 +119,9 @@ module. Every emit is checked against it: an emit outside the bounds
 fails the run.
 
 Declare the real minimum latency of every link and port. Declared
-minimums never change results. A minimum delay on a source used by a task
-that may stop the simulation also sets how long after a stop the
-simulation keeps running ([Stopping](./running#stopping)): a task that
-stops, and sends on a source with `min_delay` of 5 ns, gives a stop delay
-of 5 ns.
+minimums never change results. They may change the model's stop delay,
+how long the simulation keeps running after a stop
+([Stopping](./running#stopping)); `sim.stop_delay()` reads its value.
 
 `max_delay = Time::DELTA` says the event only ever arrives a delta cycle
 later, so it can never meet a clock edge: tasks it triggers never run in
