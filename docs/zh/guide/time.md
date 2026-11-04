@@ -19,7 +19,7 @@ let next = orr::Time::DELTA;
 `10ns` 或 `10ns+1`。`Timepoint::at(ps)` 和 `Timepoint::at_fs(fs)` 给出 delta 0 上的时刻点。时钟在 delta 0 触发；用 `DELTA` 发出的事件在同一时间的下一个
 delta 到达；用物理延迟发出的事件在之后那个时间的 delta 0 到达。时刻点严格按顺序运行：先是 `10ns` 的全部，然后是 `10ns+1` 的全部，依此类推。
 
-## 时钟
+## 时钟 {#clocks}
 
 独立的时钟是一个 `orr::Clock` 字段，在 `init` 里配置一次，给出周期和相位（第一个时钟沿的时间，小于周期），或者给出以赫兹计的频率和相位：
 

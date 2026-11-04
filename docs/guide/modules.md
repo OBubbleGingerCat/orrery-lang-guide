@@ -29,13 +29,16 @@ instance from the parameters.
 | `#[orr::trigger] clock: orr::ClockRelay` | a clock that comes from elsewhere |
 | `#[orr::trigger] out: orr::EventSource<T>` | an event source with payload `T` |
 | `#[orr::trigger] input: orr::EventRelay<T>` | events that come from elsewhere |
+| `wake: orr::Wake` | opens the gates of other modules ([Wakes](./time#wakes)) |
+| `#[orr::wake(gate = gate)] wake: orr::WakeRelay` | lets a connected wake open this module's `gate` |
+| `#[orr::constant] depth: T` | a constant, fixed for a run ([Constants](#constants)) |
 | `#[orr::submodule] child: Child` | a child instance |
 | `#[orr::interface] out: orr::FifoTx<T>` | an interface to a component ([Components](./components)) |
 | `name: T` (no attribute) | state, `T` a [plain type](./components#plain-types), a container, a `Store` or an `External` port |
 | `name: orr::StateRef<T>` | a reference to state owned by another module |
 
-A field without an Orrery attribute is state; any other attribute is an
-error.
+A field without an Orrery attribute is state; any other attribute, doc
+comments aside, is an error.
 
 **Visibility.** Parameters and submodules must be private. A parent sees
 exactly the fields of its direct children that are declared `pub` (state,
@@ -122,7 +125,7 @@ pub struct Port {
 ```
 
 Parameter types: integers, floats, `bool`, `char`, `String`, `orr::Time`
-(written as `"10ns"`, `"250 ps"` or `"delta"`), arrays and tuples of
+(written as `"10ns"`, `"250 ps"`, `"1500fs"` or `"delta"`), arrays and tuples of
 those, and any struct or enum with `#[derive(orr::ParamValue)]`. Values
 convert strictly: an integer in the file for a float parameter is an
 error.
@@ -184,7 +187,10 @@ fn init_top(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
 | `ctx.module()` | the module's own view: parameters as values, everything else as handles, children as their `pub` views (arrays are `Vec`s) |
 | `ctx.path()` | the instance path, such as `top.workers[1]` |
 | `ctx.init_clock(clock, period, phase)` | configures an independent clock, exactly once |
-| `ctx.connect(source, target)` | clock → clock relay, relay → relay, event source → event relay, relay → relay |
+| `ctx.init_clock_hz(clock, hz, phase)` | the same, by its frequency in hertz ([Clocks](./time#clocks)) |
+| `ctx.clock_info(clock)` | the `ClockInfo` of a clock, or of the clock a relay is connected to |
+| `ctx.connect(source, target)` | clock → clock relay, relay → relay, event source → event relay, relay → relay, wake → wake relay |
+| `ctx.set_const(constant, value)`, `ctx.get_const(constant)` | assigns a [constant](#constants), or reads one already assigned |
 | `ctx.share_state(state, reference)` | points a `StateRef` at a state, or at another reference; also for stores and external ports |
 | `ctx.connect_interface(&child_component, interface)` | binds an interface to a direct child component |
 | `ctx.share_interface(interface, child_interface)` | forwards an interface to a child |
@@ -194,12 +200,54 @@ not matter. Every relay, reference and interface must be connected
 exactly once: an unconnected one, a second driver, a connection to a
 source and a cycle of references are errors.
 
+## Constants {#constants}
+
+A constant is a value fixed for a run, such as a depth or another
+clock's `ClockInfo`, which an `init` assigns and tasks read. Unlike state,
+it is not in snapshots, and nothing writes it once it is assigned:
+
+```rust
+#[orr::module]
+pub struct Buffer<const N: usize> {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    #[orr::constant]
+    depth: usize,
+
+    pub count: u64,
+}
+
+#[orr::module_impl]
+impl<const N: usize> Buffer<N> {
+    #[orr::init]
+    fn init(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
+        let module = ctx.module();
+        ctx.set_const(module.depth, N)
+    }
+
+    #[orr::task(triggers = (clock,))]
+    fn fill(_ctx: &mut orr::TaskCtx, depth: &'constant usize, count: &mut u64) -> Result<(), orr::SimError> {
+        if *count < *depth as u64 {
+            *count += 1;
+        }
+        Ok(())
+    }
+}
+```
+
+The `init` of the module or of an ancestor assigns a constant, exactly
+once: a constant assigned twice, or never, is an error of `SimPlan::new`.
+A task reads it as `&'constant T`.
+
 ## Elaboration
 
 `orr::SimPlan::<Top>::new(params, snapshot)` reads the parameter file,
-builds every instance, runs the `init`s, resolves the connections, checks
-every task's bindings and analyzes the model. Its errors name instance
-paths, so they point at the place in your model. After it, the instance
+builds every instance, runs the `init`s, resolves the connections and
+checks every task's bindings. How the tasks are ordered is worked out
+when the simulation loads ([Errors](./errors#when-the-simulation-loads)).
+The errors of both name instance paths, so they point at the place in
+your model. After it, the instance
 tree is available as `plan.top`, with every field public: parameters as
 `Param<T>` (`.get()`), state and triggers as handles.
 
