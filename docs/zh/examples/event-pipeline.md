@@ -41,4 +41,4 @@ workers[1].sink.total = 660
 workers[2].sink.total = 66
 ```
 
-不论用几个 worker，得到的数都一样。
+它的 producer 发出事件，所以目前在一个 worker 上运行（[worker](../guide/running#workers)）。

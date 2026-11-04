@@ -3,9 +3,7 @@
 ## Plain types
 
 Everything stored as state or sent as an event payload is a **plain**
-type: a fixed size, copied by bytes, nothing to drop, no pointers. That is
-what lets Orrery store state in place and copy it into snapshots without
-allocating.
+type: a fixed size, copied by bytes, nothing to drop, no pointers.
 
 - Built in: integers, floats, `bool`, `()`, `orr::Time`,
   `orr::ClockInfo`, `Option<T>`, arrays and tuples of plain types.
@@ -165,21 +163,28 @@ side must be `&'latest mut`**:
 | `&mut FifoTx` | `&'latest mut FifoRx` | the producer acts first: a value pushed can be popped in the same cycle; a freed slot is reusable from the next cycle |
 
 Both `&mut`, or both `&'latest mut`, is an ordering cycle and an error when
-the plan is built, naming both tasks and the FIFO. The order belongs to
-the tasks, not to the component, and only matters in timepoints where
-both run (where two clocks meet, say).
+the simulation loads, naming both tasks and the FIFO's state
+([Errors](./errors#when-the-simulation-loads)). The order belongs to the
+tasks, not to the component, and only matters in timepoints where both
+run (where two clocks meet, say).
 
 Interfaces are never read-only: `&FifoTx` does not compile. One task may
-not hold both sides of one FIFO, and two tasks may not hold the same side.
+not hold both sides of one FIFO, an error when the plan is built, and two
+tasks may not hold the same side: where they run together, that is a
+write conflict when the simulation loads.
 
 ## Arrays and forwarding
 
-Interfaces can be arrays, connected element by element:
+Interfaces can be arrays:
 
 ```rust
 #[orr::interface]
 pub outs: [orr::FifoTx<u64>; orr::DynShape(lanes)],
-// in the owner's init:
+```
+
+The owner's `init` connects them element by element:
+
+```rust
 ctx.connect_interface(&module.fifos[lane], module.splitter.outs[lane])?;
 ```
 
@@ -191,9 +196,22 @@ interface and has its parent forward it:
 
 An interface is a struct of parts, each a `pub` field of the component,
 marked as owned (written by the holder) or as the other side's (read
-only):
+only). This is how `orr::Fifo` and its producer side are written:
 
 ```rust
+#[orr::module]
+pub struct Fifo<T: orr::Plain + Default> {
+    #[orr::param("capacity in elements", default = 2usize)]
+    depth: usize,
+
+    pub slots: orr::Array<T, orr::DynShape(depth)>,
+    pub tail: u64,
+    pub head: u64,
+}
+
+#[orr::module_impl]
+impl<T: orr::Plain + Default> Fifo<T> {}
+
 #[orr::interface(component = Fifo<T>)]
 pub struct FifoTx<T: orr::Plain + Default> {
     slots: orr::Own<orr::DynArray<T>>,
@@ -203,7 +221,13 @@ pub struct FifoTx<T: orr::Plain + Default> {
 
 impl<T: orr::Plain + Default> FifoTx<T> {
     pub fn push(&mut self, value: T) -> Result<(), T> {
-        // ...
+        let capacity = self.slots.len() as u64;
+        if *self.tail - *self.head == capacity {
+            return Err(value); // full
+        }
+        self.slots[(*self.tail % capacity) as usize] = value;
+        *self.tail += 1;
+        Ok(())
     }
 }
 ```

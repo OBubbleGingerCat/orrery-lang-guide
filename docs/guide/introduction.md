@@ -28,7 +28,8 @@ fn issue(ctx: &mut orr::TaskCtx,
 From these declarations alone, Orrery derives every ordering in the
 model. It rejects a model whose order would be ambiguous, runs the rest in
 parallel, and guarantees that the result is the one a serial run would
-give, whatever the number of workers.
+give, whatever the number of workers. For now, a model whose tasks send
+events or wake gates runs on one worker ([Workers](./running#workers)).
 
 ## What a model is made of
 
@@ -36,9 +37,9 @@ give, whatever the number of workers.
   submodules. Arrays of submodules can be sized by a parameter.
 - **State**: plain Rust values, fixed-capacity containers, sparse memories
   and external objects.
-- **Triggers**: clocks, with exact integer periods and phases in
-  picoseconds, any number of domains; and events, with a payload and a
-  delay, physical or one delta cycle.
+- **Triggers**: clocks, with exact periods and phases in femtoseconds or
+  a frequency in hertz, any number of domains; and events, with a payload
+  and a delay, physical or one delta cycle.
 - **Tasks**: Rust functions that a module's triggers run, reading and
   writing its state and emitting events.
 - **Components and interfaces**: reusable modules such as a `Fifo`, which
@@ -48,13 +49,14 @@ give, whatever the number of workers.
 
 ## What you get
 
-- **The same results in every configuration.** One worker or a hundred:
+- **The same results in every configuration.** One worker or several:
   the same final state, events and end, and when a model fails, the same
   error.
-- **Speed.** Models run on many cores, with nothing to synchronize by
-  hand.
-- **Snapshots** taken while the simulation runs, to restore and reproduce
-  a problem.
+- **Speed.** Models run on several cores, with nothing to synchronize by
+  hand: for now, the cores of one L3 domain, for models whose tasks send no
+  events and wake no gates.
+- **Snapshots** at regular boundaries, to restore and reproduce a
+  problem.
 - **Errors at load time** for most modeling mistakes (two writers of one
   register, an unconnected reference, an ordering cycle), named by the
   instance paths in your model.

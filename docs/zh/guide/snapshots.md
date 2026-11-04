@@ -1,6 +1,6 @@
 # 快照
 
-快照在固定的边界上保存运行中仿真的完整状态，而且不停止仿真。这样一次很长的运行可以从问题出现前不久的地方恢复，而不必从头开始。
+快照在固定的边界上保存运行中仿真的完整状态。这样一次很长的运行可以从问题出现前不久的地方恢复，而不必从头开始。
 
 ## 拍快照
 
@@ -14,24 +14,28 @@ let config = orr::SimConfig {
     )),
     ..orr::SimConfig::default()
 };
-let mut sim = plan.into_sim(config)?;
+let mut sim = orr::Sim::new(plan, config)?;
 sim.run_until(orr::Time::ms(5))?;
 ```
 
 边界在每 100 µs 处（100、200、…；从不在 0）。边界也可以跟随一个时钟，每 *N* 个周期一个：
 
 ```rust
-let clock = plan.top.core_clock;            // 一个时钟的句柄，在 into_sim 之前取得
-orr::SnapshotEvery::Cycles { clock, cycles: 100_000 }
+use std::num::NonZeroU64;
+
+let clock = plan.top.core_clock; // 一个时钟的句柄，在仿真加载之前取得
+let every = orr::SnapshotEvery::cycles(clock, NonZeroU64::new(100_000).unwrap());
 ```
 
 边界 *B* 处的快照，是 *B* 之前的每个时刻点都已运行、*B* 及之后的时刻点都还没有运行时的状态。
 
-`SnapshotConfig::new(every, dir)` 保留最新的 3 个快照（`keep`），每 8 个中有一个是完整快照（`full_every`）；其余的是**增量**快照，只含自上一个快照以来写过的内存单元。每个快照是 `dir` 里的一个文件，以它的边界（皮秒，20 位数字）命名，例如 100 µs 是 `00000000000100000000`；`orr::snapshot_path(dir, time)` 给出完整的文件名。文件由一个后台线程先写成临时文件，再重命名，所以存在的文件都是完整的。
+`SnapshotConfig::new(every, dir)` 保留最新的 3 个快照（`keep`）以及它们所依赖的文件，每 8 个中有一个是完整快照（`full_every`）；其余的是**增量**快照，只含自上一个快照以来的更改。每个快照是 `dir` 里的一个文件，以它的边界（飞秒，20 位数字）命名，例如 100 µs 是 `00000000100000000000.fs.orrs`；`orr::snapshot_path(dir, time)` 给出完整的文件名。快照完整写好之后，才以这个名字出现。
+
+目前拍快照和恢复都只在一个 worker 上进行：配置了快照的仿真，或者从快照恢复的仿真，在更多 worker 上加载失败（`LoadError::Config`，[worker](./running#workers)）。
 
 ## 尽力而为
 
-快照从不拖住仿真：它们在后台压缩、写盘，仿真同时继续运行。代价是，如果运行到某个边界时上一个快照还在写，这个边界就被**跳过**。写出的每个快照都是精确的，在任何 worker 数下都相同；拍快照也从不改变运行的结果。
+快照写入期间，仿真可以继续运行。如果运行到某个边界时上一个快照还在写，这个边界就被**跳过**。写出的每个快照都是精确的；拍快照也从不改变运行的结果。
 
 ```rust
 if let Some(status) = sim.wait_snapshots() {
@@ -39,7 +43,7 @@ if let Some(status) = sim.wait_snapshots() {
 }
 ```
 
-`snapshot_status()` 不等待，直接报告；`wait_snapshots()` 先等写入线程。写入失败在这里报告，不会让运行失败。
+`snapshot_status()` 不等待，直接报告；`wait_snapshots()` 先等到目前拍下的每个快照都写完或失败。没有配置快照时两者都是 `None`。写不出来的快照计入 `failed`，原因在 `last_error` 里，不会让运行失败。
 
 模型运行得比快照写得快时，就会跳过边界：一次跑到 100 ns、每 30 ns 一个快照，那么经过 60 和 90 时，30 ns 的快照可能还在写。如果每个边界都重要（比如在测试里），就分步运行，中间等待：
 
@@ -50,20 +54,19 @@ for until in [30, 60, 90, 100] {
 }
 ```
 
-## 恢复
+## 恢复 {#restoring}
 
 把最新的快照文件交给 `SimPlan::new`：
 
 ```rust
 let latest = status.latest.expect("a snapshot");   // 来自上面的 wait_snapshots()
 let plan = orr::SimPlan::<Top>::new(params, Some(latest))?;
-let mut sim = plan.into_sim(config)?;
+let mut sim = orr::Sim::new(plan, config)?;
 println!("restored from {:?}", sim.restored_from());
 sim.run_until(orr::Time::ms(5))?;   // 与原来的运行完全一样地继续
 ```
 
-增量快照按文件名在同一个目录里找到它所依赖的文件。恢复后的仿真可以用不同的
-worker 数或不同的配置；它会与原来的运行完全一样地继续下去：
+增量快照按文件名在同一个目录里找到它所依赖的文件。恢复后的仿真可以用不同的配置，但仍在一个 worker 上；它会与原来的运行完全一样地继续下去：
 
 - 边界上在途的事件照原样到达，门控、丢弃事件的计数和被门控的沿都接着原来的值；
 - 如果边界之前已经有 task 停止了仿真，而边界落在这次 stop 定下的终点之前（[停止](./running#stopping)），快照会保存这次 stop：恢复后的仿真在原来会结束的地方结束，`finished()` 也一样；
@@ -71,7 +74,7 @@ worker 数或不同的配置；它会与原来的运行完全一样地继续下�
 
 唯一的例外是发往不触发任何 task 的事件源的在途事件：它不保存，所以恢复以后不再参与多驱动和 `event_capacity` 的计算。
 
-记下事件的恢复后的仿真在构建时装 sink（[事件日志](./running#event-log)）。
+记下事件的恢复后的仿真在加载时用 `orr::Sim::with` 拿到 sink（[事件日志](./running#event-log)），外部端口也在那里绑定。
 
 恢复后的仿真在第一次运行之前，`now()` 是 `None`；`next_timepoint()` 已经给出下一个时刻点。
 
@@ -80,4 +83,4 @@ worker 数或不同的配置；它会与原来的运行完全一样地继续下�
 ## 外部端口
 
 被 task 写（`&mut External<S>`）的源对象必须实现 `save` 和 `restore`
-（[外部端口](./external-ports#snapshots)）；配置了快照时，如果有源对象不能保存，构建仿真就会失败，并给出这个端口。只读的源对象不保存：恢复时，宿主重新绑定它们。
+（[外部端口](./external-ports#snapshots)）；配置了快照时，如果有源对象不能保存，仿真就加载失败（`LoadError::Init`，stage 为 `snapshots`），并给出这个端口。只读的源对象不保存：恢复时，宿主重新绑定它们。

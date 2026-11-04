@@ -45,4 +45,5 @@ workers[1].sink.total = 660
 workers[2].sink.total = 66
 ```
 
-The same numbers come out on any number of workers.
+Its producers send events, so for now it runs on one worker
+([Workers](../guide/running#workers)).

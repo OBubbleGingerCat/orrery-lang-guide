@@ -8,7 +8,7 @@ state accesses.
 ## A port
 
 A port is a state field of type `orr::External<S>`, where `S` implements
-`orr::ExternalSource`:
+`orr::ExternalSource`, which needs `Send + Sync + 'static`:
 
 ```rust
 use orrery_lang as orr;
@@ -55,12 +55,12 @@ anything: `Vec`s, files, handles to another simulator.
 
 ## Binding sources
 
-The host creates one source object per port and binds it when it builds
-the simulation, with `into_sim_with`:
+The host creates one source object per port and binds it when it loads
+the simulation, with `orr::Sim::with`:
 
 ```rust
 let plan = orr::SimPlan::<Monitor>::new(None, None)?;
-let mut sim = plan.into_sim_with(orr::SimConfig::default(), None, |top, ports| {
+let mut sim = orr::Sim::with(plan, orr::SimConfig::default(), None, |top, ports| {
     ports.bind(top.log, Log::default())
 })?;
 sim.run_until(orr::Time::ns(2))?;
@@ -77,12 +77,16 @@ cycle 2 at 2ns
 ```
 
 Binding is by port, not by type: two ports of the same type get two
-sources. An unbound port, or one bound twice, is an error. Between runs,
-`sim.state_mut(handle)` gives the host the source object back.
+sources. An unbound port, or one bound twice, fails the load
+([Errors](./errors#when-the-simulation-loads)). Between runs,
+`sim.state_mut(handle)` gives the host the source object back. Ports do
+not keep a model on one worker: a model with ports runs on several, as
+long as nothing else keeps it on one ([Workers](./running#workers)).
 
 A port can be shared with other modules like state, through an
 `orr::StateRef<orr::External<S>>` connected with `ctx.share_state`. Ports
-cannot be arrays; use an array of submodules, one port each.
+cannot be arrays (that does not compile); use an array of submodules, one
+port each.
 
 ## Access modes
 
@@ -130,14 +134,18 @@ impl orr::ExternalSource for Trace {
 
     fn restore(&mut self, saved: &[u8]) -> Result<(), orr::plain::Error> {
         // read the position back from `saved`
+        let bytes = saved.try_into().map_err(|_| orr::plain::Error::new("a position is 8 bytes"))?;
+        self.position = u64::from_le_bytes(bytes);
         Ok(())
     }
 }
 ```
 
 With snapshots on, a simulation with an exclusive port whose source cannot
-be saved fails to build, naming the port. Read-only ports are not saved.
-If `save` returns an error, or panics, while a snapshot is being taken,
-that snapshot is abandoned and the run carries on. On restore, the host
-binds fresh sources as usual, and Orrery calls `restore` on them with what
-`save` wrote.
+be saved fails to load, naming the port. Read-only ports are not saved;
+after a restore they keep the source the host bound. If `save` returns an
+error while a snapshot is being taken, that snapshot is abandoned, counted
+as failed, and the run carries on. `save` must not panic: a panic in it
+leaves `run_until`, and the simulation cannot be used after it. On
+restore, the host binds fresh sources as usual, and Orrery calls
+`restore` on them with what `save` wrote.

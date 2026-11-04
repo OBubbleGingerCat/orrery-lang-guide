@@ -15,8 +15,7 @@ pub struct Leaf {
 impl Leaf {}
 ```
 
-宏会把结构体的字段换成生成的类型，所以模块的值从来不用手工构造：
-[展开](#elaboration)从参数建出每个实例。
+模块不用手工构造：`SimPlan::new` 按参数创建每个实例（[展开](#elaboration)），宿主通过 `plan.top` 访问它们。
 
 ## 字段
 
@@ -27,12 +26,15 @@ impl Leaf {}
 | `#[orr::trigger] clock: orr::ClockRelay` | 来自别处的时钟 |
 | `#[orr::trigger] out: orr::EventSource<T>` | 载荷为 `T` 的事件源 |
 | `#[orr::trigger] input: orr::EventRelay<T>` | 来自别处的事件 |
+| `wake: orr::Wake` | 打开其他模块的门控（[唤醒](./time#wakes)） |
+| `#[orr::wake(gate = gate)] wake: orr::WakeRelay` | 让连过来的唤醒打开本模块的 `gate` |
+| `#[orr::constant] depth: T` | 一个常量，在一次运行里固定不变（[常量](#constants)） |
 | `#[orr::submodule] child: Child` | 一个子实例 |
 | `#[orr::interface] out: orr::FifoTx<T>` | 通往一个组件的接口（[组件](./components)） |
 | `name: T`（不带属性） | 状态，`T` 是 [plain 类型](./components#plain-types)、容器、`Store` 或 `External` 端口 |
 | `name: orr::StateRef<T>` | 对另一个模块拥有的状态的引用 |
 
-不带 Orrery 属性的字段是状态；带其他任何属性都是错误。
+不带 Orrery 属性的字段是状态；除了文档注释，带其他任何属性都是错误。
 
 **可见性。** 参数和子模块必须是私有的。父模块恰好能看到直接子模块里声明为 `pub`
 的那些字段（状态、触发源、接口），更深的一层都看不到：要访问孙模块，子模块得通过自己的一个 `pub` 中继、引用或接口把它转发出来。
@@ -112,7 +114,7 @@ pub struct Port {
 ```
 
 参数的类型：整数、浮点数、`bool`、`char`、`String`、`orr::Time`（写作
-`"10ns"`、`"250 ps"` 或 `"delta"`）、由这些类型组成的数组和元组，以及任何带
+`"10ns"`、`"250 ps"`、`"1500fs"` 或 `"delta"`）、由这些类型组成的数组和元组，以及任何带
 `#[derive(orr::ParamValue)]` 的结构体或枚举。值的转换是严格的：浮点参数在文件里写成整数是错误。
 
 init 和 task 通过 `ctx.module()` 读取参数：`*ctx.module().credits_init`。参数永远不变。
@@ -163,15 +165,54 @@ fn init_top(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
 | `ctx.module()` | 模块自己的视图：参数是值，其他都是句柄，子模块是它们的 `pub` 视图（数组是 `Vec`） |
 | `ctx.path()` | 实例路径，比如 `top.workers[1]` |
 | `ctx.init_clock(clock, period, phase)` | 配置一个独立的时钟，恰好一次 |
-| `ctx.connect(source, target)` | 时钟 → 时钟中继，中继 → 中继，事件源 → 事件中继，中继 → 中继 |
+| `ctx.init_clock_hz(clock, hz, phase)` | 同上，按以赫兹计的频率（[时钟](./time#clocks)） |
+| `ctx.clock_info(clock)` | 一个时钟的 `ClockInfo`，或者一个中继所连时钟的 |
+| `ctx.connect(source, target)` | 时钟 → 时钟中继，中继 → 中继，事件源 → 事件中继，中继 → 中继，唤醒 → 唤醒中继 |
+| `ctx.set_const(constant, value)`、`ctx.get_const(constant)` | 给一个[常量](#constants)赋值，或者读一个已经赋过值的常量 |
 | `ctx.share_state(state, reference)` | 让一个 `StateRef` 指向一个状态，或者指向另一个引用；store 和外部端口也用它 |
 | `ctx.connect_interface(&child_component, interface)` | 把一个接口绑定到一个直接子组件上 |
 | `ctx.share_interface(interface, child_interface)` | 把一个接口转发给子模块 |
 
-连接在所有 `init` 都运行完之后才解析，所以连接的先后无关紧要。每个中继、引用和接口都必须恰好连接一次：没有连接、有两个驱动、连到一个源上，以及引用成环，都是错误。
+连接在所有 `init` 都运行完之后才解析，所以连接的先后无关紧要。`ctx.clock_info` 是例外：它只看到到目前为止已经初始化的时钟和已经连接的中继。`init` 从根往下运行，所以一个 `init` 能读它自己初始化过的时钟、祖先连接好的中继，以及它连接之后的子模块中继，但不能读子模块的 `init` 才配置的时钟。每个中继、引用和接口都必须恰好连接一次：没有连接、有两个驱动、连到一个源上，以及引用成环，都是错误。
+
+## 常量 {#constants}
+
+常量是一次运行里固定不变的值，比如一个深度，或者另一个时钟的 `ClockInfo`，由某个 `init` 赋值，由 task 读取。它和状态不同，不在快照里，赋值之后也没有什么会再写它：
+
+```rust
+#[orr::module]
+pub struct Buffer<const N: usize> {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    #[orr::constant]
+    depth: usize,
+
+    pub count: u64,
+}
+
+#[orr::module_impl]
+impl<const N: usize> Buffer<N> {
+    #[orr::init]
+    fn init(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
+        let module = ctx.module();
+        ctx.set_const(module.depth, N)
+    }
+
+    #[orr::task(triggers = (clock,))]
+    fn fill(_ctx: &mut orr::TaskCtx, depth: &'constant usize, count: &mut u64) -> Result<(), orr::SimError> {
+        if *count < *depth as u64 {
+            *count += 1;
+        }
+        Ok(())
+    }
+}
+```
+
+常量由它所在模块或某个祖先模块的 `init` 赋值，恰好一次：赋了两次、或者从没赋值，都是 `SimPlan::new` 的错误。task 以 `&'constant T` 读取它。
 
 ## 展开 {#elaboration}
 
-`orr::SimPlan::<Top>::new(params, snapshot)` 读取参数文件，建出每个实例，运行各个 `init`，解析连接，检查每个 task 的绑定，并分析模型。它的报错写的是实例路径，所以直接指向模型里出问题的地方。展开之后，实例树可以通过 `plan.top` 访问，所有字段都是公开的：参数是 `Param<T>`（`.get()`），状态和触发源是句柄。
+`orr::SimPlan::<Top>::new(params, snapshot)` 读取参数文件，建出每个实例，运行各个 `init`，解析连接，并检查每个 task 的绑定。各个 task 的先后在仿真加载时推出（[报错](./errors#when-the-simulation-loads)）。两者的报错写的都是实例路径，所以直接指向模型里出问题的地方。展开之后，实例树可以通过 `plan.top` 访问，所有字段都是公开的：参数是 `Param<T>`（`.get()`），状态和触发源是句柄。
 
 泛型模块和在 Rust 里一样：`Fifo<T>` 和 `Cache<const WAYS: usize>` 的每种实例化都是不同的模块类型。

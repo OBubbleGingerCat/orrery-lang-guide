@@ -28,4 +28,4 @@ lane *i* 的第 *k* 个 stage 接收自己 lane 和 lane *i* + 1 上第 *k* 个�
 
 ## 它说明了什么
 
-每种配置都打印一个校验和，所有 worker 数都必须得到同一个校验和。
+每种配置都打印一个校验和，所有 worker 数都必须得到同一个校验和。目前，task 发出事件的 lane 和 mesh 在一个 worker 上运行；受门控的单元可以在多个 worker 上运行（[worker](../guide/running#workers)）。

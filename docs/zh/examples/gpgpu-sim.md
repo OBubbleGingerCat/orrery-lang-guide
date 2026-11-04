@@ -59,4 +59,4 @@ Gpu                       core clock (1132 MHz) and DRAM clock (850 MHz)
 - **11 个 rodinia_2.0-ft 基准**：从 8,389 个周期（heartwall）到 1,172,557 个（streamcluster），共 240 万个周期、1650 万行日志；比较统计数据，以及每 10,000
   个周期一个窗口的日志哈希。
 
-每个用例和每个基准都必须完全一致：在普通循环里，以及在 Orrery 上用任意多个 worker。
+每个用例和每个基准都必须完全一致：在普通循环里，以及在 Orrery 上，用一个 worker 或多个。

@@ -90,4 +90,4 @@ model itself.
   windows of 10,000 cycles.
 
 Every case and every benchmark must match exactly, in the plain loop and
-in Orrery on any number of workers.
+in Orrery, on one worker or several.
