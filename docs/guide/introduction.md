@@ -55,8 +55,8 @@ events or wake gates runs on one worker ([Workers](./running#workers)).
 - **Speed.** Models run on several cores, with nothing to synchronize by
   hand: for now, the cores of one L3 domain, for models whose tasks send no
   events and wake no gates.
-- **Snapshots** taken while the simulation runs, to restore and reproduce
-  a problem.
+- **Snapshots** at regular boundaries, to restore and reproduce a
+  problem.
 - **Errors at load time** for most modeling mistakes (two writers of one
   register, an unconnected reference, an ordering cycle), named by the
   instance paths in your model.

@@ -46,13 +46,13 @@ features:
       width: 44
       height: 44
     details: task 的函数体是编译好的 Rust；没有事件和唤醒的模型在一个 L3 域的多个核上并行运行，其余的目前在一个 worker 上运行。
-  - title: 快照不停机
+  - title: 增量快照
     icon:
       light: /icons/snapshots.svg
       dark: /icons/snapshots-dark.svg
       width: 44
       height: 44
-    details: 快照在仿真运行的同时增量地拍下，可以从快照恢复，不必从头再跑就能复现问题。
+    details: 快照在固定的边界上增量地拍下，写入时仿真可以继续运行；从快照恢复，不必从头再跑就能复现问题。
   - title: 边界开放
     icon:
       light: /icons/open.svg

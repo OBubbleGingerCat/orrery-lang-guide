@@ -46,13 +46,13 @@ features:
       width: 44
       height: 44
     details: Task bodies are compiled Rust, and models without events or wakes run in parallel on the cores of one L3 domain; the others run on one worker for now.
-  - title: Snapshots without stopping
+  - title: Incremental snapshots
     icon:
       light: /icons/snapshots.svg
       dark: /icons/snapshots-dark.svg
       width: 44
       height: 44
-    details: Snapshots are taken while the simulation runs, incrementally, and restore it to reproduce a problem without running everything again.
+    details: Snapshots are taken at regular boundaries, incrementally, and written while the simulation runs on; restoring one reproduces a problem without running everything again.
   - title: Open at the edges
     icon:
       light: /icons/open.svg

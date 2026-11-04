@@ -1,8 +1,8 @@
 # Snapshots
 
 Snapshots save a running simulation's complete state at regular
-boundaries, without stopping it, so that a long run can be resumed from
-shortly before a problem instead of from the start.
+boundaries, so that a long run can be resumed from shortly before a
+problem instead of from the start.
 
 ## Taking snapshots
 
@@ -34,13 +34,13 @@ A snapshot at a boundary *B* is the state after every timepoint before
 *B* and before any at or after it.
 
 `SnapshotConfig::new(every, dir)` keeps the newest 3 snapshots (`keep`),
-with the files they build on, and makes every 8th one full (`full_every`); the others are
-**incremental**, holding only the memory cells written since the one
-before. Each snapshot is a file in `dir` named by its boundary in
-femtoseconds, twenty digits wide (`00000000100000000000.fs.orrs` for
-100 µs); `orr::snapshot_path(dir, time)` gives the full name. Files are
-written by a background thread, through a temporary file and a rename, so
-a file that exists is complete.
+with the files they build on, and makes every 8th one full
+(`full_every`); the others are **incremental**, holding only the changes
+since the snapshot before.
+Each snapshot is a file in `dir` named by its boundary in femtoseconds,
+twenty digits wide (`00000000100000000000.fs.orrs` for 100 µs);
+`orr::snapshot_path(dir, time)` gives the full name. A snapshot appears
+under that name only once it is completely written.
 
 For now, snapshots are taken and restored on one worker: a simulation
 with snapshots configured, or restored from one, fails to load on more
@@ -48,11 +48,10 @@ with snapshots configured, or restored from one, fails to load on more
 
 ## Best effort
 
-Snapshots never hold the simulation up: they are compressed and written
-to disk in the background while it runs on. In exchange, a boundary is
-**skipped** if the previous snapshot is still being written when the run
-reaches it. Every snapshot that is written is exact, and taking snapshots
-never changes the results of a run.
+The simulation can run on while a snapshot is being written. A boundary
+is **skipped** if the previous snapshot is still being written when the
+run reaches it. Every snapshot that is written is exact, and taking
+snapshots never changes the results of a run.
 
 ```rust
 if let Some(status) = sim.wait_snapshots() {
@@ -60,10 +59,11 @@ if let Some(status) = sim.wait_snapshots() {
 }
 ```
 
-`snapshot_status()` reports without waiting; `wait_snapshots()` waits for
-the writer first. Both are `None` without snapshots configured. A snapshot
-that cannot be written counts in `failed`, with the reason in
-`last_error`, and does not fail the run.
+`snapshot_status()` reports without waiting; `wait_snapshots()` first
+waits until every snapshot taken so far is written, or has failed. Both
+are `None` without snapshots configured. A snapshot that cannot be
+written counts in `failed`, with the reason in `last_error`, and does not
+fail the run.
 
 A model that runs faster than snapshots are written skips boundaries: run
 to 100 ns at once with a snapshot every 30 ns, and the one at 30 ns may
