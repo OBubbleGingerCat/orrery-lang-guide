@@ -171,8 +171,11 @@ returns an error.
   worker, `sim.check_trace()` checks after a run that every two accesses
   to the same state, at least one of them a write, ran in serial order.
 - **Compare worker counts.** For a model that runs on several workers,
-  results, errors included, never depend on their number. A model that
-  gives other results on another number of workers is a bug in Orrery.
+  the results of a run that ends without an error, and the error a run
+  reports, never depend on their number. A model that gives other such
+  results on another number of workers is a bug in Orrery. The state read
+  after an error may differ, as [Which error is
+  reported](#which-error-is-reported) says: that is not a bug.
 - **Snapshot and restore.** Take snapshots in a long run and restore the
   one before the problem, with a `step` loop or more logging
   ([Snapshots](./snapshots)).

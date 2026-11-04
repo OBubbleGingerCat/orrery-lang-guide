@@ -79,8 +79,10 @@ let config = orr::SimConfig {
   simulation in the same process, also on several workers, takes another
   domain, and fails to load if none is left (field `cpus`).
 
-On several workers a model gives what it gives on one: the same state,
-end and errors. For now, though, a run on several workers takes models of
+On several workers a model gives what it gives on one: the same state and
+end for a run without an error, and the same error for a run that fails
+(the state after an error is in [Errors](./errors#which-error-is-reported)).
+For now, though, a run on several workers takes models of
 clocks, [gates](./time#clock-gates), state, components such as `Fifo`,
 and [external ports](./external-ports). These fail the load on 2 or more
 workers (`LoadError::Config`, field `parallel`), and run on one:
