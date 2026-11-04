@@ -155,7 +155,7 @@ ended at 4ns
 
 有 stop 延迟时，一次运行结束和仿真结束可能不是同一次调用：
 
-- `run_until` 跑到终点 *T* + *L* 时返回 `Finished`；在那之前的 `run_until` 照常返回 `Reached`。从此以后，任何 `run_until`（不论给的时间是多少）和任何 `step` 都返回同一个 `Finished`。
+- `run_until` 跑到终点 *T* + *L* 时返回 `Finished`；在那之前的 `run_until` 照常返回 `Reached`。从此以后，任何合法的 `run_until`（不论给的是范围之内的哪个时间）和任何 `step` 都返回同一个 `Finished`；不成立的请求，例如给的是 `Time::DELTA`，仍然返回 `Request`（[报错](./errors#while-it-runs)）。
 - `step` 从不越过它运行的那个时刻点。*L* = 0 时，运行 *T* 的那次 `step` 返回 `Finished`。*L* > 0 时，`step` 一个一个地运行终点之前的时刻点，然后返回 `Idle`，`next_timepoint()` 是 `None`；之后越过终点的 `run_until` 返回 `Finished`。
 
 `Stop::Error(e)` 和来自 `SimError` 的 `Err(e)` 则让这次运行以错误结束；`?` 会做转换。终点之前的错误会被报告，在它之前返回的 stop 仍然留在 `finished()` 里；只会发生在终点之后的事情不会被报告（[报错](./errors#while-it-runs)）。

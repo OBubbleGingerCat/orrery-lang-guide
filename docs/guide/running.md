@@ -209,8 +209,10 @@ different calls:
 
 - `run_until` returns `Finished` once it has run to the end, *T* + *L*;
   an earlier `run_until` returns `Reached` as usual. From then on, every
-  `run_until`, whatever its time, and every `step` return the same
-  `Finished`.
+  `run_until` to a physical time in range, earlier or later, and every
+  `step` return the same `Finished`; a request that does not hold, such
+  as one to `Time::DELTA`, still returns `Request`
+  ([Errors](./errors#while-it-runs)).
 - `step` never runs past the timepoint it runs. With *L* = 0, the `step`
   that runs *T* returns `Finished`. With *L* > 0, `step` runs the
   timepoints up to the end one by one, then returns `Idle`, and
