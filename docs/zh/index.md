@@ -24,7 +24,7 @@ features:
       dark: /icons/deterministic-dark.svg
       width: 44
       height: 44
-    details: 一个 worker 还是多个，状态、事件、结束方式和报出的错误都完全相同。Orrery 在加载时推出模型的顺序，拒绝有歧义的写法，运行之后还可以对照检查。
+    details: 一个 worker 还是多个，没有出错的运行，状态、事件和结束方式都完全相同；出错的运行，报出的是同一个错误。Orrery 在加载时推出模型的顺序，拒绝有歧义的写法，运行之后还可以对照检查。
   - title: 用普通的 Rust 写模型
     icon:
       light: /icons/rust.svg

@@ -24,7 +24,7 @@ features:
       dark: /icons/deterministic-dark.svg
       width: 44
       height: 44
-    details: The same state, events, end and errors on one worker or several. Orrery works out the model's ordering when it loads it, rejects what is ambiguous, and can check a run against it.
+    details: On one worker or several, the same state, events and end for a run without an error, and the same error for one that fails. Orrery works out the model's ordering when it loads it, rejects what is ambiguous, and can check a run against it.
   - title: Models in plain Rust
     icon:
       light: /icons/rust.svg

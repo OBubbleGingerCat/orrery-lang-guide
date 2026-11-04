@@ -57,7 +57,7 @@ let config = orr::SimConfig {
 - *W* 个 worker 要占一个至少有 *W* + 1 个物理核的域，这些核全都在 `cpus` 允许的 CPU 里。域比这小的机器上加载会失败（`LoadError::Config`，字段 `workers_per_group`）；`cpus` 里没有一个核数足够的完整的域，加载也会失败（字段 `cpus`）。在每个域 8 个核的机器上，最多就是 7 个 worker。
 - 仿真一直占着它的域，直到被丢弃。同一个进程里另一个同样用多个 worker 的仿真会占另一个域，没有剩下的域就加载失败（字段 `cpus`）。
 
-用多个 worker 时，模型给出的和一个 worker 时相同：同样的状态、结束方式和错误。不过目前多个 worker 只能运行由时钟、[门控](./time#clock-gates)、状态、`Fifo` 这样的组件和[外部端口](./external-ports)组成的模型。下面这些在两个或更多 worker 上会让加载失败（`LoadError::Config`，字段 `parallel`），要用一个 worker 运行：
+用多个 worker 时，模型给出的和一个 worker 时相同：没有出错的运行，状态和结束方式一样；出错的运行，报出的错误一样（出错之后的状态见[报错](./errors#which-error-is-reported)）。不过目前多个 worker 只能运行由时钟、[门控](./time#clock-gates)、状态、`Fifo` 这样的组件和[外部端口](./external-ports)组成的模型。下面这些在两个或更多 worker 上会让加载失败（`LoadError::Config`，字段 `parallel`），要用一个 worker 运行：
 
 - 发出事件、或者唤醒 task 的 task（[唤醒](./time#wakes)）；
 - `checks`；

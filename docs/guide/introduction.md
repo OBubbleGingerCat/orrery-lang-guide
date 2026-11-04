@@ -50,8 +50,9 @@ events or wake gates runs on one worker ([Workers](./running#workers)).
 ## What you get
 
 - **The same results in every configuration.** One worker or several:
-  the same final state, events and end, and when a model fails, the same
-  error.
+  a run that ends without an error gives the same final state, events and
+  end, and when a model fails, it reports the same error. What the state
+  holds after the error is in [Errors](./errors#which-error-is-reported).
 - **Speed.** Models run on several cores, with nothing to synchronize by
   hand: for now, the cores of one L3 domain, for models whose tasks send no
   events and wake no gates.
