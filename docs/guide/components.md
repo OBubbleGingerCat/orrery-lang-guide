@@ -3,9 +3,7 @@
 ## Plain types
 
 Everything stored as state or sent as an event payload is a **plain**
-type: a fixed size, copied by bytes, nothing to drop, no pointers. That is
-what lets Orrery store state in place and copy it into snapshots without
-allocating.
+type: a fixed size, copied by bytes, nothing to drop, no pointers.
 
 - Built in: integers, floats, `bool`, `()`, `orr::Time`,
   `orr::ClockInfo`, `Option<T>`, arrays and tuples of plain types.

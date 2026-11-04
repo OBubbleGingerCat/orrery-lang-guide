@@ -20,8 +20,7 @@ have access to:
 [dependencies]
 orrery-lang = { path = "../orrery-lang/crates/orrery-lang" }
 
-# Recommended: task bodies, the code the macros generate and Orrery itself
-# are in different crates, and inlining across them makes models faster.
+# Recommended release settings
 [profile.release]
 lto = "fat"
 codegen-units = 1

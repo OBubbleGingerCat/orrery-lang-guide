@@ -15,8 +15,7 @@ pub struct Leaf {
 impl Leaf {}
 ```
 
-宏会把结构体的字段换成生成的类型，所以模块的值从来不用手工构造：
-[展开](#elaboration)从参数建出每个实例。
+模块不用手工构造：`SimPlan::new` 按参数创建每个实例（[展开](#elaboration)），宿主通过 `plan.top` 访问它们。
 
 ## 字段
 

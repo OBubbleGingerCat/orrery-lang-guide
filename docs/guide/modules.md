@@ -16,9 +16,9 @@ pub struct Leaf {
 impl Leaf {}
 ```
 
-The macro replaces the struct's fields with generated types, so a module
-value is never built by hand: [elaboration](#elaboration) builds every
-instance from the parameters.
+A module is not built by hand: `SimPlan::new` creates every instance
+from the parameters ([elaboration](#elaboration)), and the host reaches
+them through `plan.top`.
 
 ## Fields
 

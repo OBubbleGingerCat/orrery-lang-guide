@@ -18,8 +18,7 @@ Orrery 没有发布到 crates.io。从你能访问的一份检出依赖它：
 [dependencies]
 orrery-lang = { path = "../orrery-lang/crates/orrery-lang" }
 
-# 推荐：task 的函数体、宏生成的代码和 Orrery 本身
-# 分在不同的 crate 里，跨 crate 内联让模型更快。
+# 推荐的 release 配置
 [profile.release]
 lto = "fat"
 codegen-units = 1
