@@ -173,7 +173,7 @@ fn init_top(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
 | `ctx.connect_interface(&child_component, interface)` | 把一个接口绑定到一个直接子组件上 |
 | `ctx.share_interface(interface, child_interface)` | 把一个接口转发给子模块 |
 
-连接在所有 `init` 都运行完之后才解析，所以连接的先后无关紧要。每个中继、引用和接口都必须恰好连接一次：没有连接、有两个驱动、连到一个源上，以及引用成环，都是错误。
+连接在所有 `init` 都运行完之后才解析，所以连接的先后无关紧要。`ctx.clock_info` 是例外：它只看到到目前为止已经初始化的时钟和已经连接的中继。`init` 从根往下运行，所以一个 `init` 能读它自己初始化过的时钟、祖先连接好的中继，以及它连接之后的子模块中继，但不能读子模块的 `init` 才配置的时钟。每个中继、引用和接口都必须恰好连接一次：没有连接、有两个驱动、连到一个源上，以及引用成环，都是错误。
 
 ## 常量 {#constants}
 

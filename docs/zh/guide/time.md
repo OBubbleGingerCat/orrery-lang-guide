@@ -37,7 +37,7 @@ ctx.init_clock_hz(module.core, 1_132_000_000, orr::Time::ps(0))?;
 - `period()` 是写成分数的周期，`(num, den)` 飞秒；`interval()` 是两个沿之间最小的间隔；`phase()` 是相位。
 - `cycle_of(now)` 是一个时刻点落在第几个沿上，相位处的沿算第 1 个；`edge(cycle)` 是某个沿的时刻点；`is_edge(now)` 和 `edges_before(now)` 给出一个时刻点是不是沿、它之前有几个沿。
 
-`init` 用 `ctx.clock_info(clock)` 读时钟的 `ClockInfo`，宿主用 `plan.clock_config(handle)`。
+`init` 用 `ctx.clock_info(clock)` 读时钟的 `ClockInfo`，前提是这个时钟已经初始化、中继已经连接好（[`init`](./modules#init)）；宿主用 `plan.clock_config(handle)` 读。
 
 **多个时钟域**就是多个时钟。它们的周期和相位都是精确的，所以应该重合的时钟沿永远重合。GPGPU-Sim 模型的核心跑在 1132 MHz，DRAM 跑在 850 MHz，分别表示为
 425 和 566 皮秒的周期，两者之间的比例因此保持精确。

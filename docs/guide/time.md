@@ -55,8 +55,10 @@ on a clock sees the clock's `orr::ClockInfo` as its trigger payload:
   `is_edge(now)` and `edges_before(now)` say whether a timepoint is an
   edge and how many come before it.
 
-An `init` reads a clock's `ClockInfo` with `ctx.clock_info(clock)`, and
-the host with `plan.clock_config(handle)`.
+An `init` reads a clock's `ClockInfo` with `ctx.clock_info(clock)`, once
+the clock is initialized and, for a relay, connected
+([`init`](./modules#init)); the host reads it with
+`plan.clock_config(handle)`.
 
 **Several clock domains** are just several clocks. Their periods and
 phases are exact, so edges that should coincide do, forever. The

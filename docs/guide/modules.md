@@ -196,9 +196,13 @@ fn init_top(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
 | `ctx.share_interface(interface, child_interface)` | forwards an interface to a child |
 
 Connections are resolved after every `init` has run, so their order does
-not matter. Every relay, reference and interface must be connected
-exactly once: an unconnected one, a second driver, a connection to a
-source and a cycle of references are errors.
+not matter. `ctx.clock_info` is the exception: it sees only the clocks
+initialized and the relays connected so far. Inits run from the root
+down, so an `init` can read a clock it has initialized, a relay its
+ancestors connected, and a child's relay once it has connected it, but
+not a clock that a child's `init` configures. Every relay, reference and
+interface must be connected exactly once: an unconnected one, a second
+driver, a connection to a source and a cycle of references are errors.
 
 ## Constants {#constants}
 
