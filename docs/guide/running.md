@@ -41,7 +41,8 @@ let mut sim = orr::Sim::new(plan, orr::SimConfig::default())?;
 
 None of these changes results, except `delta_limit`, `event_capacity`
 and `fail_on_drop`, which change them deterministically: a given value
-gives the same results on any machine and any number of workers.
+gives the same results on any machine, whatever the number of workers the
+model runs on.
 
 Fields will be added. A configuration written with
 `..orr::SimConfig::default()` keeps compiling:

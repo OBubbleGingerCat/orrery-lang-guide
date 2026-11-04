@@ -71,7 +71,7 @@ cycle 1 at 1ns
 cycle 2 at 2ns
 ```
 
-绑定按端口，而不是按类型：同一类型的两个端口得到两个源对象。没有绑定的端口，或者绑定了两次的端口，都会让加载失败（[报错](./errors#when-the-simulation-loads)）。两次运行之间，`sim.state_mut(handle)` 把源对象交还给宿主。带端口的模型可以用任意多个 worker 运行（[worker](./running#workers)）。
+绑定按端口，而不是按类型：同一类型的两个端口得到两个源对象。没有绑定的端口，或者绑定了两次的端口，都会让加载失败（[报错](./errors#when-the-simulation-loads)）。两次运行之间，`sim.state_mut(handle)` 把源对象交还给宿主。端口不会把模型限制在一个 worker 上：只要没有别的东西限制它，带端口的模型可以在多个 worker 上运行（[worker](./running#workers)）。
 
 端口可以像状态一样与其他模块共享，办法是用 `ctx.share_state` 连接一个
 `orr::StateRef<orr::External<S>>`。端口不能是数组（编译不过）；请用子模块数组，每个子模块一个端口。

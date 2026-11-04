@@ -31,7 +31,7 @@ let mut sim = orr::Sim::new(plan, orr::SimConfig::default())?;
 | `idle_spin` | 1 ms | 多个 worker 时，两次运行之间仿真的线程占着核空转多久才睡眠 |
 | `slots` | 16 | 多个 worker 时的一个调优设置：2 到 1024 之间的 2 的幂 |
 
-这些字段都不改变结果，只有 `delta_limit`、`event_capacity` 和 `fail_on_drop` 例外，它们以确定的方式改变结果：给定的值在任何机器、任何 worker 数下都得到同样的结果。
+这些字段都不改变结果，只有 `delta_limit`、`event_capacity` 和 `fail_on_drop` 例外，它们以确定的方式改变结果：给定的值在任何机器上、不论模型用几个 worker 运行，都得到同样的结果。
 
 以后还会增加字段。用 `..orr::SimConfig::default()` 写的配置会一直能编译：
 
