@@ -145,7 +145,10 @@ With snapshots on, a simulation with an exclusive port whose source cannot
 be saved fails to load, naming the port. Read-only ports are not saved;
 after a restore they keep the source the host bound. If `save` returns an
 error while a snapshot is being taken, that snapshot is abandoned, counted
-as failed, and the run carries on. `save` must not panic: a panic in it
-leaves `run_until`, and the simulation cannot be used after it. On
+as failed, and the run carries on. A panic in `save` during snapshot
+capture is handled the same way: that snapshot is counted as failed, its
+`last_error` says that the source panicked and includes the message if
+the panic carries a string, and the run carries on, with `save` called
+again at the next snapshot. On
 restore, the host binds fresh sources as usual, and Orrery calls
 `restore` on them with what `save` wrote.
