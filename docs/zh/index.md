@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Orrery
   text: 用 Rust 给整个系统建模
-  tagline: 在一个 Rust 模型里结合时钟驱动的时序与离散事件，并行仿真，结果与怎么运行无关。
+  tagline: 在一个 Rust 模型里结合时钟驱动的时序与离散事件，结果与怎么运行无关。
   image:
     light: /logo.svg
     dark: /logo-dark.svg
@@ -24,7 +24,7 @@ features:
       dark: /icons/deterministic-dark.svg
       width: 44
       height: 44
-    details: 不论用几个 worker，状态、事件、结束方式和报出的错误都完全相同。Orrery 在加载时推出模型的顺序，拒绝有歧义的写法，运行之后还可以对照检查。
+    details: 一个 worker 还是多个，状态、事件、结束方式和报出的错误都完全相同。Orrery 在加载时推出模型的顺序，拒绝有歧义的写法，运行之后还可以对照检查。
   - title: 用普通的 Rust 写模型
     icon:
       light: /icons/rust.svg
@@ -38,14 +38,14 @@ features:
       dark: /icons/clocks-dark.svg
       width: 44
       height: 44
-    details: 任意多个以整数皮秒计的时钟域，加上带物理延迟或 delta 周期的事件，放在同一个模型里，从流水线的一级到 GPU 之间的网络。
+    details: 任意多个时钟域，精确到飞秒，也可以用频率给出，加上带物理延迟或 delta 周期的事件，放在同一个模型里，从流水线的一级到 GPU 之间的网络。
   - title: 为速度而设计
     icon:
       light: /icons/speed.svg
       dark: /icons/speed-dark.svg
       width: 44
       height: 44
-    details: 状态原地存放，task 的函数体是编译好的 Rust，模型里互不依赖的部分在多个核上并行运行。
+    details: task 的函数体是编译好的 Rust；没有事件和唤醒的模型在一个 L3 域的多个核上并行运行，其余的目前在一个 worker 上运行。
   - title: 快照不停机
     icon:
       light: /icons/snapshots.svg
