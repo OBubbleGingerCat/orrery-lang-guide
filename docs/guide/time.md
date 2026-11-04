@@ -120,8 +120,8 @@ A bound is a constant `orr::Time` or the name of a `Time` parameter of the
 module. Every emit is checked against it: an emit outside the bounds
 fails the run.
 
-Declare the real minimum latency of every link and port. Declared
-minimums never change results. They may change the model's stop delay,
+Declare the real minimum latency of every link and port.
+The minimums may change the model's stop delay,
 how long the simulation keeps running after a stop
 ([Stopping](./running#stopping)); `sim.stop_delay()` reads its value.
 
