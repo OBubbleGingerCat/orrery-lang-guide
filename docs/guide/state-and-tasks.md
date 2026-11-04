@@ -20,8 +20,9 @@ fn produce(ctx: &mut orr::TaskCtx, value: &mut u64) -> Result<(), orr::SimError>
 
 - `triggers = (..)` lists the triggers that run it (any of them firing
   runs it, at most once per timepoint and instance); `emits = (..)` lists
-  the event sources it may send to. An entry is a field, `field[i]` for one
-  element, or a whole array.
+  the event sources it may send to, and `wakes = (..)` the
+  [wakes](./time#wakes) it may use. An entry is a field, `field[i]` for
+  one element, or a whole array.
 - The first parameter is `ctx: &mut orr::TaskCtx`; then come the state
   parameters, in any order.
 - It returns `Result<(), orr::SimError>`, or `Result<(), orr::Stop>` if it
@@ -110,8 +111,9 @@ A container field takes its own type, or its load-time form:
 `&mut orr::Queue<Req, orr::DynShape(depth)>` is a `&mut orr::DynQueue<Req>`
 inside the task.
 
-The type a parameter names must be the field's type; a mismatch is
-reported when the plan is built, with the task and field named.
+The type a parameter names must be the field's type; a mismatch does not
+compile: "a task parameter of type `u32` cannot bind a field of type
+`u64`".
 
 ## Within one task
 
@@ -125,9 +127,10 @@ task cannot run both before and after the writer.
 | Method | Gives |
 |---|---|
 | `ctx.module()` | the module's view: parameters as values (`*ctx.module().step`) |
-| `ctx.now()` | the current `orr::Timepoint` (`.ps()`, `.delta()`, displayed as `10ns` or `10ns+1`) |
+| `ctx.now()` | the current `orr::Timepoint` (`.fs()`, `.ps()`, `.delta()`, displayed as `10ns` or `10ns+1`) |
 | `ctx.triggered_triggers()` | a tuple, one slot per `triggers` entry: `Option<&P>` for a field, `&[Option<&P>]` for an array; a clock's payload is its `ClockInfo` |
 | `ctx.emit_triggers()` | a tuple, one emitter per `emits` entry: an `orr::EventEmitter`, or an `orr::EventEmitters` for an array |
+| `ctx.wakes()` | a tuple, one per `wakes` entry: an `orr::Waker`, or an `orr::Wakers` for an array ([Wakes](./time#wakes)) |
 
 ```rust
 let (clock, inputs) = ctx.triggered_triggers();

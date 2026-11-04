@@ -15,7 +15,7 @@ fn produce(ctx: &mut orr::TaskCtx, value: &mut u64) -> Result<(), orr::SimError>
 }
 ```
 
-- `triggers = (..)` 列出运行它的触发源（其中任何一个触发都会运行它，每个时刻点、每个实例最多一次）；`emits = (..)` 列出它可能发往的事件源。每一项可以是一个字段、表示单个元素的 `field[i]`，或者一整个数组。
+- `triggers = (..)` 列出运行它的触发源（其中任何一个触发都会运行它，每个时刻点、每个实例最多一次）；`emits = (..)` 列出它可能发往的事件源，`wakes = (..)` 列出它可能用的[唤醒](./time#wakes)。每一项可以是一个字段、表示单个元素的 `field[i]`，或者一整个数组。
 - 第一个参数是 `ctx: &mut orr::TaskCtx`；后面是状态参数，顺序随意。
 - 它返回 `Result<(), orr::SimError>`；如果它可能结束仿真，则返回
   `Result<(), orr::Stop>`（[运行仿真](./running#stopping)）。
@@ -98,7 +98,7 @@ fn tick(_ctx: &mut orr::TaskCtx,
 `&mut orr::Queue<Req, orr::DynShape(depth)>` 在 task 里是
 `&mut orr::DynQueue<Req>`。
 
-参数写的类型必须就是字段的类型；不匹配会在构建 plan 时报出，并指明 task 和字段。
+参数写的类型必须就是字段的类型；不匹配编译不过："a task parameter of type `u32` cannot bind a field of type `u64`"。
 
 ## 同一个 task 之内
 
@@ -111,9 +111,10 @@ fn tick(_ctx: &mut orr::TaskCtx,
 | 方法 | 给出 |
 |---|---|
 | `ctx.module()` | 模块的视图：参数是值（`*ctx.module().step`） |
-| `ctx.now()` | 当前的 `orr::Timepoint`（`.ps()`、`.delta()`，显示为 `10ns` 或 `10ns+1`） |
+| `ctx.now()` | 当前的 `orr::Timepoint`（`.fs()`、`.ps()`、`.delta()`，显示为 `10ns` 或 `10ns+1`） |
 | `ctx.triggered_triggers()` | 一个元组，每个 `triggers` 项一个槽位：字段是 `Option<&P>`，数组是 `&[Option<&P>]`；时钟的载荷是它的 `ClockInfo` |
 | `ctx.emit_triggers()` | 一个元组，每个 `emits` 项一个发送器：一个 `orr::EventEmitter`，数组则是一个 `orr::EventEmitters` |
+| `ctx.wakes()` | 一个元组，每个 `wakes` 项一个：一个 `orr::Waker`，数组则是一个 `orr::Wakers`（[唤醒](./time#wakes)） |
 
 ```rust
 let (clock, inputs) = ctx.triggered_triggers();
