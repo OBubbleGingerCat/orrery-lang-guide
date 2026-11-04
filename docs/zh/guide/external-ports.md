@@ -5,7 +5,7 @@
 ## 端口
 
 端口是一个类型为 `orr::External<S>` 的状态字段，其中 `S` 实现了
-`orr::ExternalSource`：
+`orr::ExternalSource`，它要求 `Send + Sync + 'static`：
 
 ```rust
 use orrery_lang as orr;
@@ -51,11 +51,11 @@ impl Monitor {
 
 ## 绑定源对象
 
-宿主为每个端口创建一个源对象，在构建仿真时用 `into_sim_with` 绑定它：
+宿主为每个端口创建一个源对象，在加载仿真时用 `orr::Sim::with` 绑定它：
 
 ```rust
 let plan = orr::SimPlan::<Monitor>::new(None, None)?;
-let mut sim = plan.into_sim_with(orr::SimConfig::default(), None, |top, ports| {
+let mut sim = orr::Sim::with(plan, orr::SimConfig::default(), None, |top, ports| {
     ports.bind(top.log, Log::default())
 })?;
 sim.run_until(orr::Time::ns(2))?;
@@ -71,10 +71,10 @@ cycle 1 at 1ns
 cycle 2 at 2ns
 ```
 
-绑定按端口，而不是按类型：同一类型的两个端口得到两个源对象。没有绑定的端口，或者绑定了两次的端口，都是错误。两次运行之间，`sim.state_mut(handle)` 把源对象交还给宿主。
+绑定按端口，而不是按类型：同一类型的两个端口得到两个源对象。没有绑定的端口，或者绑定了两次的端口，都会让加载失败（[报错](./errors#when-the-simulation-loads)）。两次运行之间，`sim.state_mut(handle)` 把源对象交还给宿主。带端口的模型可以用任意多个 worker 运行（[worker](./running#workers)）。
 
 端口可以像状态一样与其他模块共享，办法是用 `ctx.share_state` 连接一个
-`orr::StateRef<orr::External<S>>`。端口不能是数组；请用子模块数组，每个子模块一个端口。
+`orr::StateRef<orr::External<S>>`。端口不能是数组（编译不过）；请用子模块数组，每个子模块一个端口。
 
 ## 访问模式
 
@@ -117,5 +117,5 @@ impl orr::ExternalSource for Trace {
 }
 ```
 
-开启快照时，如果一个独占端口的源对象不能保存，仿真就构建失败，错误信息给出这个端口。只读端口不保存。拍某个快照时，如果 `save` 返回错误或者 panic，这个快照就放弃，运行照常继续。恢复时，宿主照常绑定新的源对象，Orrery 再对它们调用
+开启快照时，如果一个独占端口的源对象不能保存，仿真就加载失败，错误信息给出这个端口。只读端口不保存；恢复之后，它们保留宿主绑定的源对象。拍某个快照时，如果 `save` 返回错误，这个快照就放弃，记为失败，运行照常继续。`save` 不能 panic：其中的 panic 会传出 `run_until`，之后这个仿真就不能再用了。恢复时，宿主照常绑定新的源对象，Orrery 再对它们调用
 `restore`，传入 `save` 写下的内容。
