@@ -125,13 +125,17 @@ fault), `kind` an `orr::FailureKind`, and `message` what it displays:
 | `more than N events in flight from one location` | `Task(Capacity)` | `event_capacity` exceeded |
 | `event delay ... is below min_delay ...` | `Task(Delay)` | an emit outside the source's declared delays, or with a delay of zero |
 | `... is after the latest time a run ... reaches, ...` | `Task(Range)` | an emit that would arrive after the latest time a run reaches ([Delta cycles](./time#delta-cycles)) |
+| `a wake delay must be Time::DELTA or a positive physical time` | `Task(WakeDelay)` | a `wake_after` with a delay of zero ([Wakes](./time#wakes)) |
+| `... is after the latest time a run ... reaches, ...` | `OutOfRange` | a `step` whose next timepoint is after the latest time a run reaches |
 | `an event at ... reached the trigger ..., whose gate ... is closed, and dropped events are errors` | `DroppedEvent` | an event dropped at a closed gate, with `fail_on_drop` ([Clock gates](./time#clock-gates)) |
 
 The other `RunError`s:
 
 - `Request`: a request that does not hold, such as a `run_until` past
   the latest time a run reaches, or to `Time::DELTA`, or a handle of
-  another simulation. Nothing runs, and the simulation goes on.
+  another simulation. Nothing runs, and the simulation goes on. A `step`
+  whose next timepoint is past that time is not a request: it fails with
+  `OutOfRange`, as above.
 - `Failed`: an earlier run failed, `an earlier run failed; the
   simulation cannot continue`.
 - `EventLog`: the [event log](./running#event-log)'s sink returned an

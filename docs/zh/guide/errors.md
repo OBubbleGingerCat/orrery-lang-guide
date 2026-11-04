@@ -101,11 +101,13 @@ and event top.b_out)
 | `more than N events in flight from one location` | `Task(Capacity)` | 超出了 `event_capacity` |
 | `event delay ... is below min_delay ...` | `Task(Delay)` | 一次发出的延迟不在源声明的延迟之内，或者延迟为零 |
 | `... is after the latest time a run ... reaches, ...` | `Task(Range)` | 一次发出的事件会在一次运行能走到的最晚时间之后到达（[delta 周期](./time#delta-cycles)） |
+| `a wake delay must be Time::DELTA or a positive physical time` | `Task(WakeDelay)` | 一次延迟为零的 `wake_after`（[唤醒](./time#wakes)） |
+| `... is after the latest time a run ... reaches, ...` | `OutOfRange` | 一次 `step` 的下一个时刻点在一次运行能走到的最晚时间之后 |
 | `an event at ... reached the trigger ..., whose gate ... is closed, and dropped events are errors` | `DroppedEvent` | 开了 `fail_on_drop` 时，一个事件在关着的门控上被丢弃（[时钟门控](./time#clock-gates)） |
 
 其他的 `RunError`：
 
-- `Request`：不成立的请求，例如 `run_until` 超过一次运行能走到的最晚时间，或者给的是 `Time::DELTA`，或者用了另一个仿真的句柄。什么也不运行，仿真还可以继续。
+- `Request`：不成立的请求，例如 `run_until` 超过一次运行能走到的最晚时间，或者给的是 `Time::DELTA`，或者用了另一个仿真的句柄。什么也不运行，仿真还可以继续。下一个时刻点超过这个时间的 `step` 不算请求：它像上表那样以 `OutOfRange` 失败。
 - `Failed`：之前的一次运行失败了，`an earlier run failed; the simulation cannot continue`。
 - `EventLog`：[事件日志](./running#event-log)的 sink 返回了错误；`LogClosed`：`close_event_log` 之后又运行。
 
