@@ -152,18 +152,22 @@ push 的值能不能在本周期 pop 出来？本周期腾出的槽能不能再�
 | `&'latest mut FifoTx` | `&mut FifoRx` | 消费者先动作：第 *k* 周期 push 的值从 *k* + 1 起才能 pop；pop 腾出的槽可以在同一周期再填 |
 | `&mut FifoTx` | `&'latest mut FifoRx` | 生产者先动作：push 的值可以在同一周期 pop；腾出的槽从下一周期起才能再用 |
 
-两侧都是 `&mut`，或者都是 `&'latest mut`，就构成一个顺序环，在构建 plan 时报错，错误信息里给出两个 task 和这个 FIFO。顺序属于 task，不属于组件，而且只在两者都运行的时刻点才有意义（比如两个时钟相遇的地方）。
+两侧都是 `&mut`，或者都是 `&'latest mut`，就构成一个顺序环，在仿真加载时报错，错误信息里给出两个 task 和这个 FIFO 的状态（[报错](./errors#when-the-simulation-loads)）。顺序属于 task，不属于组件，而且只在两者都运行的时刻点才有意义（比如两个时钟相遇的地方）。
 
-接口从来不是只读的：`&FifoTx` 无法编译。一个 task 不能同时持有同一个 FIFO 的两侧，两个 task 也不能持有同一侧。
+接口从来不是只读的：`&FifoTx` 无法编译。一个 task 不能同时持有同一个 FIFO 的两侧，这在构建 plan 时报错；两个 task 也不能持有同一侧：在它们一起运行的地方，这是仿真加载时报出的写冲突。
 
 ## 数组与转发
 
-接口可以是数组，逐个元素连接：
+接口可以是数组：
 
 ```rust
 #[orr::interface]
 pub outs: [orr::FifoTx<u64>; orr::DynShape(lanes)],
-// 在拥有者的 init 里：
+```
+
+拥有者的 `init` 逐个元素连接它们：
+
+```rust
 ctx.connect_interface(&module.fifos[lane], module.splitter.outs[lane])?;
 ```
 
@@ -172,9 +176,22 @@ ctx.connect_interface(&module.fifos[lane], module.splitter.outs[lane])?;
 
 ## 自己的接口
 
-接口是一个由若干部分组成的 struct，每个部分都是组件的一个 `pub` 字段，标为自己拥有的（由持有者写），或者另一侧的（只读）：
+接口是一个由若干部分组成的 struct，每个部分都是组件的一个 `pub` 字段，标为自己拥有的（由持有者写），或者另一侧的（只读）。`orr::Fifo` 和它的生产者一侧就是这样写的：
 
 ```rust
+#[orr::module]
+pub struct Fifo<T: orr::Plain + Default> {
+    #[orr::param("capacity in elements", default = 2usize)]
+    depth: usize,
+
+    pub slots: orr::Array<T, orr::DynShape(depth)>,
+    pub tail: u64,
+    pub head: u64,
+}
+
+#[orr::module_impl]
+impl<T: orr::Plain + Default> Fifo<T> {}
+
 #[orr::interface(component = Fifo<T>)]
 pub struct FifoTx<T: orr::Plain + Default> {
     slots: orr::Own<orr::DynArray<T>>,
@@ -184,7 +201,13 @@ pub struct FifoTx<T: orr::Plain + Default> {
 
 impl<T: orr::Plain + Default> FifoTx<T> {
     pub fn push(&mut self, value: T) -> Result<(), T> {
-        // ...
+        let capacity = self.slots.len() as u64;
+        if *self.tail - *self.head == capacity {
+            return Err(value); // 满了
+        }
+        self.slots[(*self.tail % capacity) as usize] = value;
+        *self.tail += 1;
+        Ok(())
     }
 }
 ```
