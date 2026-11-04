@@ -179,7 +179,7 @@ fn step(
     next_work: &mut u64,
 ) -> Result<(), orr::SimError> {
     if ctx.triggered_triggers().2.is_some() {
-        gate.open(); // woken: run again from the next edge
+        gate.open(); // woken: open from the next timepoint
         return Ok(());
     }
     // ... a cycle of work, which sets `next_work` ...
@@ -284,16 +284,41 @@ impl Feeder {
 ctx.connect(module.feeder.units[i], unit.wake)?;
 ```
 
-- `wake()` opens the gate from the next timepoint: the unit runs again
-  at its gated clock's first edge after now. `wake_after(delay)` opens it
-  from its first edge at or after now + `delay`, which is `DELTA` or a
-  positive physical time.
-- Several wakes of one gate at one timepoint are one, and a wake wins
-  over a `close()` by the gate's own task at the same timepoint.
+- `wake()` opens the gate from the next timepoint, and wins over a
+  `close()` written at the same timepoint, by the gate's own task too. A
+  unit that runs only on its clock, like the one above, runs again at
+  its next edge.
+- `wake_after(delay)`, with `delay` `DELTA` or a positive physical time,
+  opens the gate from now + `delay`. It takes effect just before that
+  timepoint: it wins over every `close()` written before, and a `close()`
+  written at that timepoint or later closes the gate again. A unit that
+  runs only on its clock runs at its first edge at or after that time;
+  an event that arrives at a gated trigger at that time or later passes
+  too.
+- Several wakes of one gate at one timepoint are one.
 - `ctx.wakes()` has one entry per `wakes = (..)` entry: one wake, or, for
   an array, `wake(i)`, `wake_after(i, delay)` and `len()`.
 - A `Wake` or a `WakeRelay` marked `#[orr::wake(forward)]` passes wakes
   out of a submodule or in to one, as relays pass triggers.
+
+With the `Unit` above on a 1 ns clock, and a feeder on the same clock
+that wakes two of them:
+
+```rust
+let wakes = &ctx.wakes().0;
+match ctx.now().ps() {
+    0 => {
+        wakes.wake_after(0, orr::Time::ns(2))?; // unit 0 runs at 0 and 2 ns
+        wakes.wake_after(1, orr::Time::ns(2))?; // unit 1 runs at 0, 2 and 3 ns
+    }
+    2_000 => wakes.wake(1), // wins over unit 1's close at 2 ns
+    _ => {}
+}
+```
+
+Both gates open just before 2 ns, and both units close them again when
+they run there. Unit 0's stays closed; unit 1's opens again from the next
+timepoint, by the `wake()` at 2 ns.
 
 For now, a model whose tasks wake runs on one worker
 ([Workers](./running#workers)).

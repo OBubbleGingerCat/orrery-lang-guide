@@ -122,7 +122,7 @@ fn step(
     next_work: &mut u64,
 ) -> Result<(), orr::SimError> {
     if ctx.triggered_triggers().2.is_some() {
-        gate.open(); // 被唤醒：从下一个沿起再运行
+        gate.open(); // 被唤醒：从下一个时刻点起打开
         return Ok(());
     }
     // ……一个周期的工作，其中设置 `next_work` ……
@@ -204,9 +204,26 @@ impl Feeder {
 ctx.connect(module.feeder.units[i], unit.wake)?;
 ```
 
-- `wake()` 从下一个时刻点起打开门控：这个单元在它受门控的时钟此后的第一个沿上再次运行。`wake_after(delay)` 从 now + `delay` 或之后的第一个沿起打开门控，`delay` 是 `DELTA` 或一个正的物理时间。
-- 同一个时刻点上对一个门控的几次唤醒算一次；同一个时刻点上，唤醒胜过门控自己的 task 写的 `close()`。
+- `wake()` 从下一个时刻点起打开门控，并且胜过同一个时刻点上写的 `close()`，门控自己的 task 写的也一样。像上面这样只靠时钟运行的单元，在它的下一个沿上再次运行。
+- `wake_after(delay)`（`delay` 是 `DELTA` 或一个正的物理时间）从 now + `delay` 起打开门控。它在那个时刻点之前一刻生效：胜过之前写的每个 `close()`；在那个时刻点或之后写的 `close()` 会再把门控关上。只靠时钟运行的单元，在那个时间或之后的第一个沿上运行；在那个时间或之后到达受门控触发端口的事件，也能通过。
+- 同一个时刻点上对一个门控的几次唤醒算一次。
 - `ctx.wakes()` 里，`wakes = (..)` 的每一项对应一个条目：一个唤醒；对数组则是 `wake(i)`、`wake_after(i, delay)` 和 `len()`。
 - 标了 `#[orr::wake(forward)]` 的 `Wake` 或 `WakeRelay` 把唤醒传出子模块或者传进子模块，就像中继传递触发端口一样。
+
+上面的 `Unit` 跑在 1 ns 的时钟上，另有一个跑在同一个时钟上的 feeder 唤醒其中两个：
+
+```rust
+let wakes = &ctx.wakes().0;
+match ctx.now().ps() {
+    0 => {
+        wakes.wake_after(0, orr::Time::ns(2))?; // 单元 0 在 0 和 2 ns 运行
+        wakes.wake_after(1, orr::Time::ns(2))?; // 单元 1 在 0、2 和 3 ns 运行
+    }
+    2_000 => wakes.wake(1), // 胜过单元 1 在 2 ns 的 close
+    _ => {}
+}
+```
+
+两个门控都在 2 ns 之前一刻打开，两个单元在 2 ns 运行时又把它们关上。单元 0 的门控就此关着；单元 1 的门控因为 2 ns 的 `wake()`，从下一个时刻点起又打开了。
 
 目前，有 task 发出唤醒的模型用一个 worker 运行（[worker](./running#workers)）。
