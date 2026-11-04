@@ -16,7 +16,7 @@ let config = orr::SimConfig {
     )),
     ..orr::SimConfig::default()
 };
-let mut sim = plan.into_sim(config)?;
+let mut sim = orr::Sim::new(plan, config)?;
 sim.run_until(orr::Time::ms(5))?;
 ```
 
@@ -24,30 +24,35 @@ Boundaries are at every 100 µs (100, 200, …; never at 0). They can also
 follow a clock, every *N* of its cycles:
 
 ```rust
-let clock = plan.top.core_clock;            // a clock's handle, taken before into_sim
-orr::SnapshotEvery::Cycles { clock, cycles: 100_000 }
+use std::num::NonZeroU64;
+
+let clock = plan.top.core_clock; // a clock's handle, taken before the simulation loads
+let every = orr::SnapshotEvery::cycles(clock, NonZeroU64::new(100_000).unwrap());
 ```
 
 A snapshot at a boundary *B* is the state after every timepoint before
 *B* and before any at or after it.
 
-`SnapshotConfig::new(every, dir)` keeps the newest 3 snapshots (`keep`)
-and makes every 8th one full (`full_every`); the others are
+`SnapshotConfig::new(every, dir)` keeps the newest 3 snapshots (`keep`),
+with the files they build on, and makes every 8th one full (`full_every`); the others are
 **incremental**, holding only the memory cells written since the one
 before. Each snapshot is a file in `dir` named by its boundary in
-picoseconds, twenty digits wide (`00000000000100000000` for 100 µs);
-`orr::snapshot_path(dir, time)` gives the full name. Files are written by
-a background thread, through a temporary file and a rename, so a file
-that exists is complete.
+femtoseconds, twenty digits wide (`00000000100000000000.fs.orrs` for
+100 µs); `orr::snapshot_path(dir, time)` gives the full name. Files are
+written by a background thread, through a temporary file and a rename, so
+a file that exists is complete.
+
+For now, snapshots are taken and restored on one worker: a simulation
+with snapshots configured, or restored from one, fails to load on more
+(`LoadError::Config`, [Workers](./running#workers)).
 
 ## Best effort
 
 Snapshots never hold the simulation up: they are compressed and written
 to disk in the background while it runs on. In exchange, a boundary is
 **skipped** if the previous snapshot is still being written when the run
-reaches it. Every snapshot that is written is exact, and the same on any
-number of workers, and taking snapshots never changes the results of a
-run.
+reaches it. Every snapshot that is written is exact, and taking snapshots
+never changes the results of a run.
 
 ```rust
 if let Some(status) = sim.wait_snapshots() {
@@ -56,8 +61,9 @@ if let Some(status) = sim.wait_snapshots() {
 ```
 
 `snapshot_status()` reports without waiting; `wait_snapshots()` waits for
-the writer first. A write failure is reported there and does not fail the
-run.
+the writer first. Both are `None` without snapshots configured. A snapshot
+that cannot be written counts in `failed`, with the reason in
+`last_error`, and does not fail the run.
 
 A model that runs faster than snapshots are written skips boundaries: run
 to 100 ns at once with a snapshot every 30 ns, and the one at 30 ns may
@@ -78,15 +84,14 @@ Give the latest snapshot file to `SimPlan::new`:
 ```rust
 let latest = status.latest.expect("a snapshot");   // from wait_snapshots() above
 let plan = orr::SimPlan::<Top>::new(params, Some(latest))?;
-let mut sim = plan.into_sim(config)?;
+let mut sim = orr::Sim::new(plan, config)?;
 println!("restored from {:?}", sim.restored_from());
 sim.run_until(orr::Time::ms(5))?;   // continues exactly as the original run
 ```
 
 An incremental snapshot finds the files it builds on by name, in the same
-directory. The restored simulation may use a different number of workers
-or a different configuration; it continues exactly as the original run
-would have:
+directory. The restored simulation may use a different configuration, still
+on one worker; it continues exactly as the original run would have:
 
 - events in flight at the boundary arrive as they would have, and gates,
   dropped events and gated edges carry on from where they were;
@@ -103,8 +108,9 @@ The one exception is an event in flight on a source that triggers no
 task: it is not saved, so after a restore it no longer counts towards a
 multi-drive or `event_capacity`.
 
-A restored simulation that logs its events takes its sink as it is built
-([Event log](./running#event-log)).
+A restored simulation that logs its events is given its sink when it
+loads, with `orr::Sim::with` ([Event log](./running#event-log)), and its
+external ports are bound there too.
 
 Until its first run, a restored simulation's `now()` is `None`;
 `next_timepoint()` already gives the next timepoint.
@@ -119,6 +125,6 @@ restored with a fixed bug in a task, which is often the point.
 
 Sources that tasks write (`&mut External<S>`) must implement `save` and
 `restore` ([External ports](./external-ports#snapshots)); with snapshots
-configured, building a simulation whose sources cannot be saved fails and
-names the port. Read-only sources are not saved: on restore, the host
-binds them again.
+configured, a simulation whose sources cannot be saved fails to load
+(`LoadError::Init`, stage `snapshots`) and names the port. Read-only
+sources are not saved: on restore, the host binds them again.
