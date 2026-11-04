@@ -162,7 +162,7 @@ impl Top {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let params = std::env::args_os().nth(1).map(std::path::PathBuf::from);
     let plan = orr::SimPlan::<Top>::new(params, None)?;
-    let mut sim = plan.into_sim(orr::SimConfig::default())?;
+    let mut sim = orr::Sim::new(plan, orr::SimConfig::default())?;
     match sim.run_until(orr::Time::ns(100))? {
         orr::RunEnd::Reached(time) => println!("ran until {time}"),
         orr::RunEnd::Finished(finished) => println!("finished at {}", finished.at),
@@ -178,9 +178,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 - `SimPlan::new` reads the parameters (or uses the defaults when given
-  `None`), builds the instances, runs the `init`s and checks the model.
-- `into_sim` makes the simulation, here with the default configuration
-  ([Running a simulation](./running#configuration)).
+  `None`), builds the instances, runs the `init`s and checks the
+  connections.
+- `orr::Sim::new` loads the simulation, here with the default
+  configuration, one worker ([Running a simulation](./running#configuration)).
+  It also checks how the tasks are ordered.
 - `run_until` runs every timepoint up to 100 ns. The clock ticks at 0, 10,
   …, 100 ns, so each sink ends at 1 + 2 + … + 11 = 66.
 - `sim.top()` gives handles to the model's state, read with `sim.state`.
