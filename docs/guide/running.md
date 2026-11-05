@@ -78,6 +78,21 @@ let config = orr::SimConfig {
 - The simulation holds its domain until it is dropped. Another
   simulation in the same process, also on several workers, takes another
   domain, and fails to load if none is left (field `cpus`).
+- A simulation in another process does not see the domains this one
+  holds, and may take the same one. To run several at once, each on
+  several workers, give each its own `cpus`, with no CPU in common
+  (`lscpu -e` gives each CPU's L3 cache, last in its `L1d:L1i:L2:L3`
+  column):
+
+  ```rust
+  // Where CPUs 0-7 and 8-15 are two L3 domains: in one process,
+  let config = orr::SimConfig {
+      workers_per_group: 4,
+      cpus: Some((0..8).collect()),
+      ..orr::SimConfig::default()
+  };
+  // and in another, at the same time, cpus: Some((8..16).collect()).
+  ```
 
 On several workers a model gives what it gives on one: the same state and
 end for a run without an error, and the same error for a run that fails
