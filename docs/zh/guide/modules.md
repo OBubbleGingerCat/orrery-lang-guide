@@ -75,6 +75,8 @@ tags: [u64; orr::DynShape(depth)],
 `#[orr::reset(with = f)]` 对默认值调用 `fn f(value: &mut T)`，
 `#[orr::reset(with = f, args = [p, q])]` 还会把参数也传给它。复位值在模型展开时计算。
 
+没有 `#[orr::reset(..)]` 的字段，初值只用 `Default::default()` 做一次，不是每个实例做一次：每个实例、状态数组的每个元素，都从它的一份拷贝开始。大小由参数定的类型，如 `orr::Array<T, orr::DynShape(depth)>`，实例里有几种大小就做几次。所以每次调用给出不同值的 `Default`（比如从一个计数器取号），仍让每个实例从同一个值开始。要让各个实例的初值不同，用 `#[orr::reset(..)]`，像上面的 `credits` 那样从参数取。
+
 ## 参数
 
 参数有一个 `default`（必需），还可以有 `validate = f`，即一个函数
