@@ -90,6 +90,16 @@ tags: [u64; orr::DynShape(depth)],
 value, and `#[orr::reset(with = f, args = [p, q])]` passes it the
 parameters too. Reset values are computed when the model is elaborated.
 
+Without `#[orr::reset(..)]`, a field's starting value is made once, from
+`Default::default()`, not once for each instance: every instance, and
+every element of a state array, starts at a copy of it. A type sized by
+a parameter, as `orr::Array<T, orr::DynShape(depth)>`, has one such
+value for each size its instances have. So a `Default` that gives a
+different value at each call, numbering its values from a counter say,
+still starts every instance at the same value. Give values that differ
+by instance with `#[orr::reset(..)]`, from a parameter as for `credits`
+above.
+
 ## Parameters
 
 A parameter has a `default` (required) and optionally `validate = f`, a
