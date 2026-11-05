@@ -58,7 +58,11 @@ workers: [Worker; orr::DynShape(worker_count)],
 ```
 
 - `[X; 4]`: a fixed length, a nonzero literal;
-- `[X; N]`: a const generic of the module;
+- `[X; N]`: a constant, which is a const generic of the module, a
+  `const` in scope where the module is defined (`CORES`,
+  `cfg::CORES`, `<T as Trait>::N`), or an expression of these
+  (`2 * N`, `{ N + 1 }`). It may not name `Self` or a field of the
+  module. Zero is an error;
 - `[X; orr::DynShape(p)]`: the value of parameter `p` of the same module,
   per instance. The parameter is named directly; expressions are not
   allowed. Zero is an error.
