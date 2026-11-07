@@ -58,7 +58,7 @@
   %BothFirst.receive at top.consumer reads it (latest); ...
   ```
 
-  对 FIFO 来说，这就是两侧都声称自己先动作，或者都声称在后（[组件](./components#who-acts-first)）。
+  对 FIFO 来说，这就是两侧都声称自己先动作，或者都声称在后（[组件](./components#who-acts-first)），或者消费者先动作时有 task 用 `&'latest FifoRx` 看消费者一端（[组件](./components#looking-without-popping)）。
 
 **配置**（`LoadError::Config`，带字段名）：`delta_limit` 超过 62，`groups` 不是 1，`workers_per_group` 为 0 或者超过一个 L3 域容得下的数目，以及多个 worker 目前还不能运行的东西（[worker](./running#workers)）。
 

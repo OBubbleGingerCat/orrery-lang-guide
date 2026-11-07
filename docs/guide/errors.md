@@ -67,7 +67,9 @@ access modes ([State and tasks](./state-and-tasks#access-modes)):
   ```
 
   For a FIFO, this is both sides claiming to act first, or both after
-  ([Components](./components#who-acts-first)).
+  ([Components](./components#who-acts-first)), or a task looking at the
+  consumer's end with `&'latest FifoRx` when the consumer acts first
+  ([Components](./components#looking-without-popping)).
 
 **The configuration** (`LoadError::Config`, with the field): a
 `delta_limit` above 62, `groups` other than 1, `workers_per_group` of 0
