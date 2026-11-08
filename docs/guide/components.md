@@ -168,10 +168,155 @@ the simulation loads, naming both tasks and the FIFO's state
 tasks, not to the component, and only matters in timepoints where both
 run (where two clocks meet, say).
 
-Interfaces are never read-only: `&FifoTx` does not compile. One task may
-not hold both sides of one FIFO, an error when the plan is built, and two
-tasks may not hold the same side: where they run together, that is a
-write conflict when the simulation loads.
+One task holds both sides of one FIFO only to look at both, as
+`&FifoTx<T>` and `&FifoRx<T>`: it sees the whole FIFO as the cycle began.
+If either side is `&mut` or `&'latest mut`, or one is `&` and the other
+`&'latest`, which would read the same counter at two points of the
+cycle, that is an error when the plan is built:
+
+```rust
+// Fine: both sides, both `&`.
+#[orr::task(triggers = (clock,))]
+fn watch(
+    _ctx: &mut orr::TaskCtx,
+    out: &orr::FifoTx<u64>,
+    inbox: &orr::FifoRx<u64>,
+    free: &mut u64,
+) -> Result<(), orr::SimError> {
+    *free = (out.capacity() - inbox.len()) as u64;
+    Ok(())
+}
+```
+
+Two tasks may not hold the same side with `&mut` or `&'latest mut`:
+where they run together, that is a write conflict when the simulation
+loads. Other tasks may still look at a side
+([Looking without popping](#looking-without-popping)).
+
+## Looking without popping
+
+Sometimes several tasks need to see what waits in a FIFO while only one
+of them pops: an arbiter that looks at the front of each of its input
+queues, a task that counts how full a buffer is. Such a task takes the
+end by shared reference, `&FifoRx<T>` or `&'latest FifoRx<T>`, and calls
+the methods that only look: `front`, `get(i)`, `len`, `is_empty`,
+`capacity`. Any number of tasks may look at an end this way, besides the
+one task that pops from it; they cannot change it, and `pop` through a
+`&FifoRx` does not compile.
+
+What a looking task sees of the current cycle:
+
+| Form | The other side's changes | Its own side's changes |
+|---|---|---|
+| `&FifoRx` | not seen | not seen |
+| `&'latest FifoRx` | seen | not seen |
+
+On the consumer's end, `&FifoRx` sees the FIFO as the cycle began, before
+this cycle's push and before this cycle's pop. `&'latest FifoRx` sees
+this cycle's push, but still not this cycle's pop. The producer's end
+works the same way, `&FifoTx` and `&'latest FifoTx` with the sides
+swapped: a looking task never sees its own side's changes of the cycle.
+
+`&'latest FifoRx` has to come after the producer and before the pop, so
+it needs the producer to act first (`&mut FifoTx` and
+`&'latest mut FifoRx`). When the consumer acts first there is no such
+place: that is an ordering cycle, an error when the simulation loads
+([Errors](./errors#when-the-simulation-loads)). `&FifoRx` fits either
+order. Arrays work alike: `&[orr::FifoRx<T>]` and
+`&'latest [orr::FifoRx<T>]`.
+
+A complete example: the producer acts first and pushes a value every
+cycle, the consumer pops one every cycle, and two more tasks of the
+consumer look at the FIFO.
+
+```rust
+use orrery_lang as orr;
+
+#[orr::module]
+pub struct Producer {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    #[orr::interface]
+    pub out: orr::FifoTx<u64>,
+
+    next: u64,
+}
+
+#[orr::module_impl]
+impl Producer {
+    // Acts first: pushes 1, 2, 3, ... while there is room.
+    #[orr::task(triggers = (clock,))]
+    fn send(
+        _ctx: &mut orr::TaskCtx,
+        out: &mut orr::FifoTx<u64>,
+        next: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if out.push(*next + 1).is_ok() {
+            *next += 1;
+        }
+        Ok(())
+    }
+}
+
+#[orr::module]
+pub struct Consumer {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    #[orr::interface]
+    pub inbox: orr::FifoRx<u64>,
+
+    pub waiting: u64,
+    pub newest: u64,
+    pub sum: u64,
+}
+
+#[orr::module_impl]
+impl Consumer {
+    // Acts after the producer: takes one value a cycle.
+    #[orr::task(triggers = (clock,))]
+    fn receive(
+        _ctx: &mut orr::TaskCtx,
+        inbox: &'latest mut orr::FifoRx<u64>,
+        sum: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if let Some(value) = inbox.pop() {
+            *sum += value;
+        }
+        Ok(())
+    }
+
+    // Looks before this cycle's push and pop.
+    #[orr::task(triggers = (clock,))]
+    fn peek(
+        _ctx: &mut orr::TaskCtx,
+        inbox: &orr::FifoRx<u64>,
+        waiting: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        *waiting = inbox.len() as u64;
+        Ok(())
+    }
+
+    // Looks after this cycle's push, before its pop.
+    #[orr::task(triggers = (clock,))]
+    fn look(
+        _ctx: &mut orr::TaskCtx,
+        inbox: &'latest orr::FifoRx<u64>,
+        newest: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if let Some(last) = inbox.len().checked_sub(1) {
+            *newest = *inbox.get(last).unwrap();
+        }
+        Ok(())
+    }
+}
+```
+
+`Top` connects them as in the first example. In every cycle `peek` finds
+the FIFO empty, `look` finds the value just pushed, and `receive` then
+pops it: after ten cycles (0 to 9 ns), `waiting` is 0, `newest` is 10 and
+`sum` is 55.
 
 ## Arrays and forwarding
 
@@ -235,7 +380,12 @@ impl<T: orr::Plain + Default> FifoTx<T> {
 Each part's name must be a `pub` field of the component with a compatible
 type; this is checked at compile time. Under `&mut I`, a task writes the
 owned parts and reads the others as they were (`curr`); under
-`&'latest mut I`, it reads them after the other side (`latest`). Any
+`&'latest mut I`, it reads them after the other side (`latest`). A task
+that only looks takes `&I` or `&'latest I` (`&[I]`, `&'latest [I]` for
+arrays): it reads what its side owns as it was before this cycle's
+changes, and the rest as `&mut I` or `&'latest mut I` would, and can
+call only the methods that take `&self`. If your interface has an
+`impl Drop`, its `drop` does not run for a task that takes it this way. Any
 module can be a component, including modules with tasks of their own:
 interfaces are a general way to give a module a typed, ordered port, much
 like a SystemVerilog interface and its modports.
