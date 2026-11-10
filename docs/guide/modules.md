@@ -73,7 +73,9 @@ taken whole) is an `orr::Array<T, N>` instead.
 
 A task takes an array of interfaces whole as a view, `orr::ArrayView`
 ([Arrays and forwarding](./components#arrays-and-forwarding),
-[Functions over arrays](./components#functions-over-arrays)).
+[Functions over arrays](./components#functions-over-arrays)), and may
+take a state array, or a `StateRef` array, as one too
+([Binding other fields](./state-and-tasks#binding-other-fields)).
 
 ## Reset values
 
