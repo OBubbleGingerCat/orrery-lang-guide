@@ -406,7 +406,8 @@ What a view gives:
 
 | Method | Gives |
 |---|---|
-| `len()`, `is_empty()` | the number of elements |
+| `len()` | the number of elements |
+| `is_empty()` | whether it has none |
 | `at(i)` | element `i`; past the end it panics, as a slice's index does |
 | `get(i)` | element `i`, or `None` past the end |
 | `iter()` | the elements in order |
