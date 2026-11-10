@@ -223,7 +223,10 @@ it needs the producer to act first (`&mut FifoTx` and
 place: that is an ordering cycle, an error when the simulation loads
 ([Errors](./errors#when-the-simulation-loads)). `&FifoRx` fits either
 order. Arrays work alike: `&[orr::FifoRx<T>]` and
-`&'latest [orr::FifoRx<T>]`.
+`&'latest [orr::FifoRx<T>]`, and the views that take an array of
+interfaces, `&orr::ArrayView<[orr::FifoRx<T>]>` and
+`&'latest orr::ArrayView<[orr::FifoRx<T>]>`
+([Arrays and forwarding](#arrays-and-forwarding)).
 
 A complete example: the producer acts first and pushes a value every
 cycle, the consumer pops one every cycle, and two more tasks of the
@@ -337,6 +340,215 @@ A module that is not the component's direct parent declares the same
 interface and has its parent forward it:
 `ctx.share_interface(module.inbox, module.consumer.inbox)?`.
 
+A task takes an array of interfaces as a view, `orr::ArrayView`, in the
+same forms as one interface: `&orr::ArrayView<[I]>` and
+`&'latest orr::ArrayView<[I]>` to look, `&mut orr::ArrayView<[I]>` and
+`&'latest mut orr::ArrayView<[I]>` to change its side of each. An arbiter
+with 80 inputs looks at all of them, picks the first with a request
+waiting, and serves it:
+
+```rust
+use orrery_lang as orr;
+use orr::prelude::*;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, orr::Plain)]
+pub struct Req {
+    pub addr: u64,
+    pub bytes: u32,
+}
+
+#[orr::module]
+pub struct Arbiter {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    #[orr::interface]
+    pub ins: [orr::FifoRx<Req>; 80],
+
+    picked: u32,
+    pub served: u64,
+}
+
+#[orr::module_impl]
+impl Arbiter {
+    // Looks at every input as the cycle began: the first with a request
+    // waiting, or 80 if none.
+    #[orr::task(triggers = (clock,))]
+    fn pick(
+        _ctx: &mut orr::TaskCtx,
+        ins: &orr::ArrayView<[orr::FifoRx<Req>]>,
+        picked: &mut u32,
+    ) -> Result<(), orr::SimError> {
+        let first = ins.iter().position(|input| !input.is_empty());
+        *picked = first.unwrap_or(ins.len()) as u32;
+        Ok(())
+    }
+
+    // Pops from the input `pick` chose this cycle.
+    #[orr::task(triggers = (clock,))]
+    fn serve(
+        _ctx: &mut orr::TaskCtx,
+        ins: &'latest mut orr::ArrayView<[orr::FifoRx<Req>]>,
+        picked: &'latest u32,
+        served: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if let Some(mut input) = ins.get_mut(*picked as usize) {
+            if let Some(req) = input.pop() {
+                *served += u64::from(req.bytes);
+            }
+        }
+        Ok(())
+    }
+}
+```
+
+What a view gives:
+
+| Method | Gives |
+|---|---|
+| `len()` | the number of elements |
+| `is_empty()` | whether it has none |
+| `at(i)` | element `i`; past the end it panics, as a slice's index does |
+| `get(i)` | element `i`, or `None` past the end |
+| `iter()` | the elements in order |
+| `at_mut(i)`, `get_mut(i)` | element `i`, to change (`&mut` forms) |
+| `iter_mut()` | the elements in order, each once, to change (`&mut` forms) |
+
+An element derefs to the interface, so its methods that look (`front`,
+`len`, `is_empty`) are called on it directly. `at(i)` gives the element
+anew each time it is called: when the body uses one element several
+times, take it once into a local variable and use that,
+`let input = ins.at(i);`.
+
+The FIFO's `push` and `pop` on an element come from the traits
+`use orr::prelude::*;` brings into scope. Without that import, `pop` on
+an element does not compile, with an error about borrowing it as mutable
+(E0596). A single `&mut orr::FifoRx<T>` pops with or without it.
+
+The producer's side writes through a view the same way, here a request
+offered to every eighth lane each cycle:
+
+```rust
+#[orr::module]
+pub struct Source {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    #[orr::interface]
+    pub outs: [orr::FifoTx<Req>; 80],
+
+    next: u64,
+}
+
+#[orr::module_impl]
+impl Source {
+    #[orr::task(triggers = (clock,))]
+    fn send(
+        _ctx: &mut orr::TaskCtx,
+        outs: &mut orr::ArrayView<[orr::FifoTx<Req>]>,
+        next: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        for mut out in outs.iter_mut().step_by(8) {
+            if out.push(Req { addr: *next, bytes: 64 }).is_ok() {
+                *next += 64;
+            }
+        }
+        Ok(())
+    }
+}
+```
+
+`Top` connects each lane's FIFO to `source.outs[lane]` and
+`arbiter.ins[lane]`, element by element as above. After ten cycles (0 to
+9 ns) `served` is 576: in the first cycle `pick` finds every input
+empty, and in each one after, it picks lane 0 and `serve` pops 64 bytes.
+
+## Functions over arrays
+
+A view can be passed to your own functions, so that what walks the array
+is written once. Take `&orr::ArrayView<[R]>`, or `&mut`, with
+`R: orr::ArrayElem`, and say what the function needs of an element with
+a trait of your own:
+
+```rust
+pub trait Lane {
+    fn waiting(&self) -> usize;
+}
+
+impl Lane for orr::FifoRx<Req> {
+    fn waiting(&self) -> usize {
+        self.len()
+    }
+}
+
+/// The first input with a request waiting.
+pub fn first_waiting<R: orr::ArrayElem + Lane>(ins: &orr::ArrayView<[R]>) -> Option<usize> {
+    ins.iter().position(|input| input.waiting() > 0)
+}
+```
+
+A task passes its view as it is: `first_waiting(ins)`. A test makes a
+view of a slice instead, with `orr::ArrayView::of(&values)`, or
+`orr::ArrayView::of_mut(&mut values)` to change them. Plain values work
+as they are; a type of your own standing in for an interface needs one
+line, `impl orr::InPlace for Waiting {}`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // An input in a test: how many requests wait.
+    struct Waiting(usize);
+
+    impl orr::InPlace for Waiting {}
+
+    impl Lane for Waiting {
+        fn waiting(&self) -> usize {
+            self.0
+        }
+    }
+
+    #[test]
+    fn picks_the_first_input_with_work() {
+        let ins = vec![Waiting(0), Waiting(2), Waiting(1)];
+        assert_eq!(first_waiting(&orr::ArrayView::of(&ins)), Some(1));
+    }
+}
+```
+
+A function that also changes elements bounds what it reads and what it
+writes separately, since an interface's element to change is not a
+`&mut` to the interface: `X: orr::ViewElem`, the reading trait on
+`X::Target` (what `at(i)` derefs to), the writing one on
+`for<'a> X::Mut<'a>` (what `at_mut(i)` gives: `orr::ElemMut` for an
+interface, `&mut` for a value):
+
+```rust
+pub trait Take {
+    fn take(&mut self) -> Option<Req>;
+}
+
+impl Take for orr::ElemMut<'_, orr::FifoRx<Req>> {
+    fn take(&mut self) -> Option<Req> {
+        self.pop()
+    }
+}
+
+/// Takes a request from the first input with one waiting.
+pub fn take_first<X: orr::ViewElem>(ins: &mut orr::ArrayView<[X]>) -> Option<Req>
+where
+    X::Target: Lane,
+    for<'a> X::Mut<'a>: Take,
+{
+    let first = ins.iter().position(|input| input.waiting() > 0)?;
+    ins.at_mut(first).take()
+}
+```
+
+In a test, `impl Take for &mut Ring` for a stand-in `Ring`, and
+`take_first(&mut orr::ArrayView::of_mut(&mut rings))`.
+
 ## Your own interfaces
 
 An interface is a struct of parts, each a `pub` field of the component,
@@ -377,15 +589,51 @@ impl<T: orr::Plain + Default> FifoTx<T> {
 }
 ```
 
-Each part's name must be a `pub` field of the component with a compatible
-type; this is checked at compile time. Under `&mut I`, a task writes the
-owned parts and reads the others as they were (`curr`); under
+Each part's name must be a `pub` field of the component with a
+compatible type; this is checked at compile time. Under `&mut I`, a task
+writes the owned parts and reads the others as they were (`curr`); under
 `&'latest mut I`, it reads them after the other side (`latest`). A task
 that only looks takes `&I` or `&'latest I` (`&[I]`, `&'latest [I]` for
 arrays): it reads what its side owns as it was before this cycle's
 changes, and the rest as `&mut I` or `&'latest mut I` would, and can
 call only the methods that take `&self`. If your interface has an
-`impl Drop`, its `drop` does not run for a task that takes it this way. Any
-module can be a component, including modules with tasks of their own:
-interfaces are a general way to give a module a typed, ordered port, much
-like a SystemVerilog interface and its modports.
+`impl Drop`, its `drop` does not run for a task that takes it this way, nor
+for the elements of a view that only looks; an element taken to change
+(`at_mut`, `get_mut`, `iter_mut`) runs it once, when the task drops the
+element. Any module can be a component, including modules with tasks of
+their own: interfaces are a general way to give a module a typed,
+ordered port, much like a SystemVerilog interface and its modports.
+
+A task can take your interface read only, alone or in a view, when each
+part's value type can be shared: plain values and the standard
+containers can. A container type of your own needs `orr::SharedView`,
+five lines its documentation shows.
+
+Methods that change the parts are best written as a trait over
+`orr::PartsMut<I>`, so that they work on a single `&mut I` and on a
+view's element alike: `parts()` reads the interface, and
+`own_mut(|p| &p.part)` gives one of its own parts to change. The
+producer's `push` above, written this way:
+
+```rust
+pub trait FifoTxWrite<T: orr::Plain + Default>: orr::PartsMut<FifoTx<T>> {
+    fn push(&mut self, value: T) -> Result<(), T> {
+        let fifo = self.parts();
+        let capacity = fifo.slots.len() as u64;
+        if *fifo.tail - *fifo.head == capacity {
+            return Err(value); // full
+        }
+        let slot = (*fifo.tail % capacity) as usize;
+        self.own_mut(|fifo| &fifo.slots)[slot] = value;
+        *self.own_mut(|fifo| &fifo.tail) += 1;
+        Ok(())
+    }
+}
+
+impl<T: orr::Plain + Default, P: orr::PartsMut<FifoTx<T>> + ?Sized> FifoTxWrite<T> for P {}
+```
+
+A module that pushes to a view's elements imports the trait where it
+does so, as `use orr::prelude::*;` does for the standard FIFO. A method
+of the interface itself that takes `&mut self` works on a single
+`&mut I` only.

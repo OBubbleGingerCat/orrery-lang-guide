@@ -107,6 +107,53 @@ A whole array is `&[T]`, `&'latest [T]` or `&mut [T]`. Part of one is
 #[orr::bind(values)] first_two: &mut [u64; orr::PartialAccess(0, 2)],
 ```
 
+An array of plain values can also be taken as a view,
+`&orr::ArrayView<[T]>`, `&'latest orr::ArrayView<[T]>` or
+`&mut orr::ArrayView<[T]>`, of a fixed length (`[T; 3]`) or of a
+selection (`[T; orr::PartialAccess(2, 0)]`, its elements in the
+selection's order), with the methods of a
+[view](./components#arrays-and-forwarding). Its elements are the state
+itself, read and written in place. That counts where the elements are
+not one run of values, as a `StateRef` array's, other modules' state,
+often are not, nor a selection's that skips or reorders: a slice of such
+elements is a copy, and a `&mut` slice's changes are copied back only
+when the task returns `Ok`, while a view's writes land at once, and stay
+if the task then fails. A tally reading the grants of four ports, each a
+`StateRef` its parent points at a port's `grant` with `ctx.share_state`:
+
+```rust
+#[orr::module]
+pub struct Tally {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    pub grants: [orr::StateRef<u32>; 4],
+    credits: [u32; 4],
+    pub total: u64,
+}
+
+#[orr::module_impl]
+impl Tally {
+    #[orr::task(triggers = (clock,))]
+    fn tally(
+        _ctx: &mut orr::TaskCtx,
+        grants: &orr::ArrayView<[u32]>,
+        credits: &mut [u32],
+        total: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        for (credit, grant) in credits.iter_mut().zip(grants.iter()) {
+            *credit += *grant;
+            *total += u64::from(*grant);
+        }
+        Ok(())
+    }
+}
+```
+
+A function over views ([Functions over arrays](./components#functions-over-arrays))
+takes a view of state as it takes one of interfaces: `u32` is an
+`orr::ArrayElem`.
+
 A container field takes its own type, or its load-time form:
 `&mut orr::Queue<Req, orr::DynShape(depth)>` is a `&mut orr::DynQueue<Req>`
 inside the task.
@@ -121,6 +168,14 @@ Two parameters of one task may refer to the same location (through
 references or interfaces, say) only if both are `&` or both are
 `&'latest`. Anything else is an error when the plan is built, since one
 task cannot run both before and after the writer.
+
+A view taken to change lends one element at a time: while an element
+from `at_mut(i)` is in use, the view gives no other, and asking for one
+does not compile. To work on several elements together, go through them
+with `iter_mut()`, which gives each once. An element's interface cannot
+be swapped with another or moved out of it; to change the order in
+which a task serves its inputs, keep the order as indices in state and
+follow it ([Arrays and forwarding](./components#arrays-and-forwarding)).
 
 ## The task context
 

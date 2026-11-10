@@ -77,7 +77,7 @@ impl Stage {
 寄存器和连线就是这样建模的：用 `&` 读流水线寄存器，得到上一个周期的值；用
 `&'latest` 读组合信号，得到这个周期的值。
 
-## 绑定其他字段
+## 绑定其他字段 {#binding-other-fields}
 
 `#[orr::bind(field)]` 把参数绑定到另一个名字的字段上，`#[orr::bind(field[3])]`
 则绑定到数组的一个元素上：
@@ -94,6 +94,39 @@ fn tick(_ctx: &mut orr::TaskCtx,
 #[orr::bind(values)] first_two: &mut [u64; orr::PartialAccess(0, 2)],
 ```
 
+plain 值的数组也可以当视图取，`&orr::ArrayView<[T]>`、`&'latest orr::ArrayView<[T]>` 或 `&mut orr::ArrayView<[T]>`，可以是定长的（`[T; 3]`），也可以是一个选择（`[T; orr::PartialAccess(2, 0)]`，元素按选择的次序），方法和[视图](./components#arrays-and-forwarding)一样。它的元素就是状态本身，原地读写。元素不是连成一段的值时这一点才要紧：`StateRef` 数组的元素是别的模块的状态，常常不连成一段；跳着选、换了次序的选择也不连成一段。这样的元素做成切片是拷贝，`&mut` 切片的改动只在 task 返回 `Ok` 时才拷回去；视图的写马上落下，task 之后失败也留着。一个统计四个端口授权的模块，每个 `StateRef` 由父模块用 `ctx.share_state` 指到一个端口的 `grant`：
+
+```rust
+#[orr::module]
+pub struct Tally {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+
+    pub grants: [orr::StateRef<u32>; 4],
+    credits: [u32; 4],
+    pub total: u64,
+}
+
+#[orr::module_impl]
+impl Tally {
+    #[orr::task(triggers = (clock,))]
+    fn tally(
+        _ctx: &mut orr::TaskCtx,
+        grants: &orr::ArrayView<[u32]>,
+        credits: &mut [u32],
+        total: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        for (credit, grant) in credits.iter_mut().zip(grants.iter()) {
+            *credit += *grant;
+            *total += u64::from(*grant);
+        }
+        Ok(())
+    }
+}
+```
+
+对视图写的函数（[对数组写函数](./components#functions-over-arrays)）收状态的视图，和收接口的视图一样：`u32` 是 `orr::ArrayElem`。
+
 容器字段用它自己的类型，或者它加载时的形式：
 `&mut orr::Queue<Req, orr::DynShape(depth)>` 在 task 里是
 `&mut orr::DynQueue<Req>`。
@@ -105,6 +138,8 @@ fn tick(_ctx: &mut orr::TaskCtx,
 一个 task 的两个参数可以指向同一个位置（比如经由引用或接口），但只有两者都是
 `&`，或者都是 `&'latest` 时才行。其他情况在构建 plan 时报错，因为一个 task
 不能既在写者之前、又在写者之后运行。
+
+用来改的视图一次借出一个元素：`at_mut(i)` 取出的元素还在用时，视图不再给别的元素，要别的就编译不过。要几个元素一起处理，用 `iter_mut()` 依次走过，每个给一次。元素里的接口不能和别的互换，也不能挪出来；要改 task 服务各输入的次序，把次序作为下标存在状态里，照着走（[数组与转发](./components#arrays-and-forwarding)）。
 
 ## task 上下文
 

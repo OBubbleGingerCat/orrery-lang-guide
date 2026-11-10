@@ -57,6 +57,8 @@ workers: [Worker; orr::DynShape(worker_count)],
 
 状态数组的每个元素都是一个独立的位置，与其他元素分开定序。应当作为一个位置的值（总是整体取用的缓冲区）要改用 `orr::Array<T, N>`。
 
+task 把接口数组整个当视图取，`orr::ArrayView`（[数组与转发](./components#arrays-and-forwarding)、[对数组写函数](./components#functions-over-arrays)）；状态数组、`StateRef` 数组也可以当视图取（[绑定其他字段](./state-and-tasks#binding-other-fields)）。
+
 ## 复位值
 
 状态的初值是 `Default::default()`，或者 `#[orr::reset(..)]` 给出的值：
