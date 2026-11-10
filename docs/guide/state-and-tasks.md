@@ -122,6 +122,14 @@ references or interfaces, say) only if both are `&` or both are
 `&'latest`. Anything else is an error when the plan is built, since one
 task cannot run both before and after the writer.
 
+A view taken to change lends one element at a time: while an element
+from `at_mut(i)` is in use, the view gives no other, and asking for one
+does not compile. To work on several elements together, go through them
+with `iter_mut()`, which gives each once. An element's interface cannot
+be swapped with another or moved out of it; to change the order in
+which a task serves its inputs, keep the order as indices in state and
+follow it ([Arrays and forwarding](./components#arrays-and-forwarding)).
+
 ## The task context
 
 | Method | Gives |
