@@ -135,8 +135,10 @@ fn step(
 }
 ```
 
+单元自己知道下一次什么时候有活的时候（固定的延迟、一个计时器、要等满的时序参数），就把门控关到那时，而不是关上以后等别人叫醒：这样不用别的单元来发唤醒，也不用推算该提前几拍发。
+
 - 写入从下一个时刻点起生效。在当前时刻点内，门控保持触发端口看到的值，`is_open()` 报告的也是这个值。
-- `close_until(t)` 在 `t` 打开门控：在 `t` 或之后到达的事件可以通过，时钟从 `t` 或之后的第一个沿起再运行。`t` 不必是时钟沿。
+- `close_until(t)` 在 `t` 打开门控：在 `t` 或之后到达的事件可以通过，时钟从 `t` 或之后的第一个沿起再运行。`t` 不必是时钟沿。`orr::Timepoint::at(ps)` 是以皮秒计的一个时间的第 0 个 delta（以飞秒计用 `Timepoint::at_fs`）。
 - 门控开始时是打开的，或者按复位值：
   `#[orr::reset(orr::Gate::closed())]`、
   `#[orr::reset(orr::Gate::closed_until(orr::Timepoint::at(4_000)))]`。
@@ -149,13 +151,88 @@ fn step(
 - 一个门控只控制一个 task 的触发端口，一个 task 受门控的触发端口共用一个门控；
 - 只有这个 task 写门控；其他 task 可以读它。
 
-宏和 `SimPlan::new` 会检查这些规则。task 取得的门控留在这次调用里：对它用 `std::mem::take` 或 `std::mem::replace` 编译不过。
+宏和 `SimPlan::new` 会检查这些规则。所以同一个模块里两个 task 各关各的门控时，各要一个触发端口字段：两个 `ClockRelay` 字段，各写自己的 `gate = ..`，都接到同一个时钟。
+
+task 取得的 `&mut orr::Gate` 在这次调用期间就是门控本身。仿真之外造不出门控，所以 task 不能把它拿着的门控移出这次调用：`std::mem::take(gate)` 和 `std::mem::replace(gate, ..)` 都编不过，`orr::Gate::default()` 也编不过。同一次调用拿着的两个门控可以用 `std::mem::swap` 交换；通过其中任何一个写，写到的是它交换后拿着的那个门控。
 
 两次运行之间，宿主通过 `sim.gate_mut(handle)` 取得门控：`open()`、`close()`、`close_until(t)`、`is_open()` 和 `opens()`。它写入的值在下一次运行开始时生效。`sim.state` 和 `sim.state_mut` 不接受门控。`sim.gated_edges(handle)` 读取计数。`sim.dropped_events()` 按实例、task 和触发端口列出丢弃的事件，如果有丢弃，仿真被丢弃时会打印一条警告；设了 `SimConfig::fail_on_drop`，第一个被丢弃的事件就是错误，它所在的时刻点一个 task 也不运行。快照带上门控、丢弃事件的计数和被门控的沿，所以恢复后的运行接着计数。
 
 ## 唤醒 {#wakes}
 
-一个 task 可以不发事件，而用**唤醒**打开另一个模块的门控。发送方的模块声明一个 `orr::Wake` 字段，并在 task 的 `wakes` 里列出它；接收方的模块声明一个 `orr::WakeRelay`，指明它打开哪个门控；由某个 `init` 用 `ctx.connect` 把两者连起来：
+一个关了门控、等有活再开的单元，由带活来的那个单元通过**唤醒**（wake）打开。唤醒只打开门控，别的什么也不做：不运行 task，也不带值。
+
+- 发的一方的模块有一个 `orr::Wake` 类型的字段（或者数组 `[orr::Wake; N]`），发唤醒的 task 在 `wakes = (..)` 里写上它。`ctx.wakes()` 里，`wakes = (..)` 的每一项对应一个条目：一个唤醒用 `ctx.wakes().0.wake()` 发；数组用 `wake(i)` 叫醒第 `i` 个元素，另有 `wake_after(i, delay)` 和 `len()`。
+- 收的一方的模块有一个 `orr::WakeRelay` 类型的字段，标上它打开哪个门控：`#[orr::wake(gate = gate)]`。指明门控的中继是单个字段，不能是数组。
+- 父模块在 init 里把两者连起来：`ctx.connect(module.producer.consumer, module.consumer.wake)?`。
+
+一个 FIFO 空了就关门控的消费者，和每推一个就叫醒它的生产者：
+
+```rust
+#[orr::module]
+pub struct Consumer {
+    #[orr::trigger(gate = gate)]
+    pub clock: orr::ClockRelay,
+    #[orr::wake(gate = gate)]
+    pub wake: orr::WakeRelay,
+    #[orr::interface]
+    pub inbox: orr::FifoRx<u64>,
+    pub gate: orr::Gate,
+    pub sum: u64,
+}
+
+#[orr::module_impl]
+impl Consumer {
+    #[orr::task(triggers = (clock,))]
+    fn take(
+        _ctx: &mut orr::TaskCtx,
+        inbox: &mut orr::FifoRx<u64>,
+        gate: &mut orr::Gate,
+        sum: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if let Some(value) = inbox.pop() {
+            *sum += value;
+        }
+        if inbox.is_empty() {
+            gate.close(); // 等生产者叫醒
+        }
+        Ok(())
+    }
+}
+
+#[orr::module]
+pub struct Producer {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+    #[orr::interface]
+    pub out: orr::FifoTx<u64>,
+    pub consumer: orr::Wake,
+    next: u64,
+}
+
+#[orr::module_impl]
+impl Producer {
+    #[orr::task(triggers = (clock,), wakes = (consumer,))]
+    fn send(
+        ctx: &mut orr::TaskCtx,
+        out: &'latest mut orr::FifoTx<u64>,
+        next: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        *next += 1;
+        if *next % 4 == 0 && out.push(*next).is_ok() {
+            ctx.wakes().0.wake();
+        }
+        Ok(())
+    }
+}
+```
+
+**唤醒什么时候生效。**
+
+- `wake()` 从下一个时刻点起打开门控：关着的单元在它受门控的时钟的、现在之后的第一个沿再运行。同一个时刻点里对同一个门控的几次唤醒算一次。
+- 唤醒赢过门控自己的 task 在同一个时刻点写的 `close()`。上面的消费者可能就在生产者推入并叫醒它的那一拍发现 FIFO 空了、写了关；门控仍然开着。
+- `wake_after(delay)` 从现在 + `delay`（`orr::Time::DELTA` 或一个正的时间）或之后的第一个沿起打开门控。它在那之前一刻生效：赢过在那之前写的所有 `close()`，从那时起写的 `close()` 赢过它。在那个时间或之后到达受门控触发端口的事件，也能通过。对 *n* 个沿以后到期的值，`orr::wake_delay(now, clock, n)?` 就是让门控正好在值被看见的那个沿打开的延迟（[延迟](./components#delays)）。
+
+一个每次运行都关上自己门控的单元，和一个跑在同一个 1 ns 时钟上、唤醒其中两个的 feeder（`units: [orr::Wake; 2]`，写在它的 task 的 `wakes` 里）：
 
 ```rust
 #[orr::module]
@@ -173,57 +250,40 @@ impl Unit {
     #[orr::task(triggers = (clock,))]
     fn step(_ctx: &mut orr::TaskCtx, gate: &mut orr::Gate, runs: &mut u64) -> Result<(), orr::SimError> {
         *runs += 1;
-        gate.close(); // 没事可做，直到被唤醒
+        gate.close(); // nothing to do until woken
         Ok(())
     }
 }
 
-#[orr::module]
-pub struct Feeder {
-    #[orr::trigger]
-    pub clock: orr::ClockRelay,
-    pub units: [orr::Wake; 2],
-}
-
-#[orr::module_impl]
-impl Feeder {
-    #[orr::task(triggers = (clock,), wakes = (units,))]
-    fn feed(ctx: &mut orr::TaskCtx) -> Result<(), orr::SimError> {
-        let clock = ctx.triggered_triggers().0.expect("runs on its clock");
-        let wakes = &ctx.wakes().0;
-        if clock.cycle_of(ctx.now()) % 4 == 0 {
-            wakes.wake(1); // 从下一个时刻点起
-            wakes.wake_after(0, clock.interval())?; // 从下一个沿起
-        }
-        Ok(())
-    }
-}
-```
-
-```rust
-ctx.connect(module.feeder.units[i], unit.wake)?;
-```
-
-- `wake()` 从下一个时刻点起打开门控，并且胜过同一个时刻点上写的 `close()`，门控自己的 task 写的也一样。像上面这样只靠时钟运行的单元，在它的下一个沿上再次运行。
-- `wake_after(delay)`（`delay` 是 `DELTA` 或一个正的物理时间）从 now + `delay` 起打开门控。它在那个时刻点之前一刻生效：胜过之前写的每个 `close()`；在那个时刻点或之后写的 `close()` 会再把门控关上。只靠时钟运行的单元，在那个时间或之后的第一个沿上运行；在那个时间或之后到达受门控触发端口的事件，也能通过。
-- 同一个时刻点上对一个门控的几次唤醒算一次。
-- `ctx.wakes()` 里，`wakes = (..)` 的每一项对应一个条目：一个唤醒；对数组则是 `wake(i)`、`wake_after(i, delay)` 和 `len()`。
-- 标了 `#[orr::wake(forward)]` 的 `Wake` 或 `WakeRelay` 把唤醒传出子模块或者传进子模块，就像中继传递触发端口一样。
-
-上面的 `Unit` 跑在 1 ns 的时钟上，另有一个跑在同一个时钟上的 feeder 唤醒其中两个：
-
-```rust
+// In the feeder's task:
 let wakes = &ctx.wakes().0;
 match ctx.now().ps() {
     0 => {
-        wakes.wake_after(0, orr::Time::ns(2))?; // 单元 0 在 0 和 2 ns 运行
-        wakes.wake_after(1, orr::Time::ns(2))?; // 单元 1 在 0、2 和 3 ns 运行
+        wakes.wake_after(0, orr::Time::ns(2))?; // unit 0 runs at 0 and 2 ns
+        wakes.wake_after(1, orr::Time::ns(2))?; // unit 1 runs at 0, 2 and 3 ns
     }
-    2_000 => wakes.wake(1), // 胜过单元 1 在 2 ns 的 close
+    2_000 => wakes.wake(1), // wins over unit 1's close at 2 ns
     _ => {}
 }
 ```
 
-两个门控都在 2 ns 之前一刻打开，两个单元在 2 ns 运行时又把它们关上。单元 0 的门控就此关着；单元 1 的门控因为 2 ns 的 `wake()`，从下一个时刻点起又打开了。
+两个门控都在 2 ns 之前一刻打开，两个单元在那里运行时又都把它关上。单元 0 的门控就此关着；单元 1 的门控因为 2 ns 那次 `wake()`，从下一个时刻点起又打开了。
 
-目前，有 task 发出唤醒的模型用一个 worker 运行（[worker](./running#workers)）。
+**谁先动作决定唤醒赶不赶得上。** 唤醒不能让被叫醒的 task 在发出唤醒的这个时刻点里运行。这要不要紧，取决于两个 task 在一拍里的先后（[谁先动作](./components#who-acts-first)）：
+
+| 生产者 | 消费者 | 消费者关着时推进去的值，什么时候被弹出 |
+|---|---|---|
+| `&'latest mut FifoTx`（后动） | `&mut FifoRx`（先动） | 下一拍，和门控一直开着一样：赶得上 |
+| `&mut FifoTx`（先动） | `&'latest mut FifoRx`，由 `clock + delta(1)` 触发 | 同一拍，和门控一直开着一样：赶得上 |
+| `&mut FifoTx`（先动） | `&'latest mut FifoRx`，同一层 | **晚一拍**：门控一直开着时同一拍就会弹出 |
+
+第三种排法，要么把消费者挪到晚一层的 delta，要么在可能有值到来时不关它的门控。检查一个关门控的单元：把同一个模型改成门控从不关再跑一遍，结果要一样，而且在同样的拍上。
+
+**穿过子模块。** `#[orr::wake(forward)]` 让唤醒穿过模块的边界：
+
+- 标在 `orr::Wake` 字段上，把子模块的唤醒传出去：模块的 init 把子模块的唤醒连到它，父模块像连 task 的唤醒那样连它。task 不通过它发唤醒。
+- 标在 `orr::WakeRelay` 字段上（可以是数组），把唤醒传进来：模块的 init 把它连到子模块的中继。
+
+转发的唤醒上没有连任何唤醒，或者转发的中继最终没有通到门控，建仿真时报错。
+
+**用唤醒还是用不受门控的事件。** [时钟门控](#clock-gates)那个例子里的 `wake` 触发端口是一个不受门控的事件：它到达时运行 task，由 task 打开门控。被叫醒的单元在自己的状态或 FIFO 里就能找到要做的事，用唤醒；叫醒时要带一个值，或者单元必须在它到达的那一刻就动作，用不受门控的事件。

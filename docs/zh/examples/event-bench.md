@@ -28,4 +28,24 @@ lane *i* 的第 *k* 个 stage 接收自己 lane 和 lane *i* + 1 上第 *k* 个�
 
 ## 它说明了什么
 
-每种配置都打印一个校验和，所有 worker 数都必须得到同一个校验和。目前，task 发出事件的 lane 和 mesh 在一个 worker 上运行；受门控的单元可以在多个 worker 上运行（[worker](../guide/running#workers)）。
+每种配置都打印一个校验和，所有线程数都必须得到同一个校验和。
+
+## 构建和运行 {#build-and-run}
+
+在 Orrery 仓库里，用 `bench/models/event_bench/params/` 下的一个参数文件：
+
+```sh
+cargo build --release -p event-bench-model --bin event-bench
+target/release/event-bench --params bench/models/event_bench/params/light.toml --workers 4
+target/release/event-bench --model mesh --hop timed --params bench/models/event_bench/params/mesh_light.toml
+target/release/event-bench --model gated --params bench/models/event_bench/params/gated_turns.toml
+```
+
+```text
+tokens 160016 checksum a834b91aff890990
+10000 cycles in 0.192s (19.2 µs per cycle, 0.071s to load)
+```
+
+- `--model plain|mixed|mesh|mesh_goal|gated` 选形状（缺省是 lane；`mixed` 加上受时钟触发的级），`--hop delta|timed` 选级与级之间怎么传，`--cycles <n>` 选长度（缺省 10,000），`--workers <n>` 选线程数（[线程](../guide/running#threads)）。
+- 配 lane 以外的 `--model` 的参数文件，开头几行写明了是哪个。
+- 第一行是结果，用几个线程都一样；第二行是用时，构建仿真的时间单独列出。

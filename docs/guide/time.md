@@ -194,11 +194,17 @@ fn step(
 }
 ```
 
+When a unit knows when it will next have work (a fixed latency, a timer,
+a timing parameter it waits out), close its gate until then rather than
+closing it and waiting to be woken: no other unit has to send the wake, or
+work out how many edges ahead to send it.
+
 - A write takes effect from the next timepoint. Within the timepoint the
   gate keeps the value the triggers saw, which `is_open()` reports.
 - `close_until(t)` opens the gate at `t`: events that arrive at `t` or
   later pass, and the clock runs again from its first edge at or after
-  `t`. `t` need not be an edge.
+  `t`. `t` need not be an edge. `orr::Timepoint::at(ps)` is delta 0 of a
+  time in picoseconds (`Timepoint::at_fs` in femtoseconds).
 - A gate starts open, or as its reset says:
   `#[orr::reset(orr::Gate::closed())]`,
   `#[orr::reset(orr::Gate::closed_until(orr::Timepoint::at(4_000)))]`.
@@ -217,15 +223,22 @@ A gate, its triggers and the task that writes it belong together:
   share one gate;
 - only that task writes the gate; other tasks may read it.
 
-The macros and `SimPlan::new` check these. The gate a task takes stays
-in its call: `std::mem::take` and `std::mem::replace` on it do not
-compile.
+The macros and `SimPlan::new` check these. So two tasks of one module
+that close gates of their own need a trigger field each: two `ClockRelay`
+fields, each with its own `gate = ..`, both connected to the same clock.
+
+The `&mut orr::Gate` a task takes is the gate itself, for the call. No
+gate is made outside the simulation, so a task cannot move the one it
+holds out of the call: `std::mem::take(gate)` and
+`std::mem::replace(gate, ..)` do not compile, and neither does
+`orr::Gate::default()`. Two gates one call holds may be swapped with
+`std::mem::swap`; a write through either reaches the gate it then holds.
 
 Between runs, `sim.gate_mut(handle)` gives the host the gate:
 `open()`, `close()`, `close_until(t)`, `is_open()` and `opens()`. What it
 writes takes effect when the next run starts. `sim.state` and
-`sim.state_mut` do not take a gate. `sim.gated_edges(handle)` reads the
-counts. `sim.dropped_events()` lists the dropped events per
+`sim.state_mut` do not take a gate. `sim.gated_edges(handle)`
+reads the counts. `sim.dropped_events()` lists the dropped events per
 instance, task and trigger, and dropping the simulation prints a warning
 if there were any; with `SimConfig::fail_on_drop` the first one is an
 error instead, and no task runs at its timepoint. Snapshots carry the gates, the dropped events and the
@@ -233,11 +246,102 @@ gated edges, so a restored run continues the counts.
 
 ## Wakes {#wakes}
 
-A task can open another module's gate without sending an event, by a
-**wake**. The sending module declares an `orr::Wake` field and lists it in
-its task's `wakes`; the receiving module declares an `orr::WakeRelay`
-that names the gate it opens; an `init` connects the two with
-`ctx.connect`:
+A unit that closed its gate until there is work is opened by the unit that
+brings the work, through a **wake**. A wake opens a gate and does nothing
+else: it runs no task and carries no value.
+
+- The sending module has a field of type `orr::Wake` (or an array,
+  `[orr::Wake; N]`), and the task that wakes names it in
+  `wakes = (..)`. `ctx.wakes()` has one entry per `wakes = (..)` entry:
+  for one wake, `ctx.wakes().0.wake()` sends it; for an array,
+  `wake(i)` wakes element `i`, with `wake_after(i, delay)` and `len()`.
+- The receiving module has a field of type `orr::WakeRelay`, marked with
+  the gate it opens: `#[orr::wake(gate = gate)]`. A relay that names a
+  gate is a single field, not an array.
+- The parent connects the two in its init:
+  `ctx.connect(module.producer.consumer, module.consumer.wake)?`.
+
+A consumer that closes its gate whenever its FIFO is empty, and the
+producer that wakes it whenever it pushes:
+
+```rust
+#[orr::module]
+pub struct Consumer {
+    #[orr::trigger(gate = gate)]
+    pub clock: orr::ClockRelay,
+    #[orr::wake(gate = gate)]
+    pub wake: orr::WakeRelay,
+    #[orr::interface]
+    pub inbox: orr::FifoRx<u64>,
+    pub gate: orr::Gate,
+    pub sum: u64,
+}
+
+#[orr::module_impl]
+impl Consumer {
+    #[orr::task(triggers = (clock,))]
+    fn take(
+        _ctx: &mut orr::TaskCtx,
+        inbox: &mut orr::FifoRx<u64>,
+        gate: &mut orr::Gate,
+        sum: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if let Some(value) = inbox.pop() {
+            *sum += value;
+        }
+        if inbox.is_empty() {
+            gate.close(); // until the producer wakes it
+        }
+        Ok(())
+    }
+}
+
+#[orr::module]
+pub struct Producer {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+    #[orr::interface]
+    pub out: orr::FifoTx<u64>,
+    pub consumer: orr::Wake,
+    next: u64,
+}
+
+#[orr::module_impl]
+impl Producer {
+    #[orr::task(triggers = (clock,), wakes = (consumer,))]
+    fn send(
+        ctx: &mut orr::TaskCtx,
+        out: &'latest mut orr::FifoTx<u64>,
+        next: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        *next += 1;
+        if *next % 4 == 0 && out.push(*next).is_ok() {
+            ctx.wakes().0.wake();
+        }
+        Ok(())
+    }
+}
+```
+
+**When a wake takes effect.**
+
+- `wake()` opens the gate from the next timepoint: a closed unit runs
+  again at its gated clocks' first edge after now. Several wakes of one
+  gate at one timepoint are one.
+- A wake wins over a `close()` that the gate's own task writes at the
+  same timepoint. Above, the consumer may find its FIFO empty and close in
+  the very cycle the producer pushes and wakes it; the gate stays open.
+- `wake_after(delay)` opens the gate from its first edge at or after
+  now + `delay` (`orr::Time::DELTA` or a positive time). It takes effect
+  just before then: it wins over every `close()` written before, and a
+  `close()` from then on wins over it. An event that arrives at a gated
+  trigger at that time or later passes too. For a value that is due *n* edges
+  on, `orr::wake_delay(now, clock, n)?` is the delay that opens the gate
+  at the edge where the value is seen ([Delays](./components#delays)).
+
+A unit that closes its gate each time it runs, and a feeder on the same
+1 ns clock that wakes two of them (`units: [orr::Wake; 2]`, named in its
+task's `wakes`):
 
 ```rust
 #[orr::module]
@@ -260,53 +364,7 @@ impl Unit {
     }
 }
 
-#[orr::module]
-pub struct Feeder {
-    #[orr::trigger]
-    pub clock: orr::ClockRelay,
-    pub units: [orr::Wake; 2],
-}
-
-#[orr::module_impl]
-impl Feeder {
-    #[orr::task(triggers = (clock,), wakes = (units,))]
-    fn feed(ctx: &mut orr::TaskCtx) -> Result<(), orr::SimError> {
-        let clock = ctx.triggered_triggers().0.expect("runs on its clock");
-        let wakes = &ctx.wakes().0;
-        if clock.cycle_of(ctx.now()) % 4 == 0 {
-            wakes.wake(1); // from the next timepoint
-            wakes.wake_after(0, clock.interval())?; // from the next edge on
-        }
-        Ok(())
-    }
-}
-```
-
-```rust
-ctx.connect(module.feeder.units[i], unit.wake)?;
-```
-
-- `wake()` opens the gate from the next timepoint, and wins over a
-  `close()` written at the same timepoint, by the gate's own task too. A
-  unit that runs only on its clock, like the one above, runs again at
-  its next edge.
-- `wake_after(delay)`, with `delay` `DELTA` or a positive physical time,
-  opens the gate from now + `delay`. It takes effect just before that
-  timepoint: it wins over every `close()` written before, and a `close()`
-  written at that timepoint or later closes the gate again. A unit that
-  runs only on its clock runs at its first edge at or after that time;
-  an event that arrives at a gated trigger at that time or later passes
-  too.
-- Several wakes of one gate at one timepoint are one.
-- `ctx.wakes()` has one entry per `wakes = (..)` entry: one wake, or, for
-  an array, `wake(i)`, `wake_after(i, delay)` and `len()`.
-- A `Wake` or a `WakeRelay` marked `#[orr::wake(forward)]` passes wakes
-  out of a submodule or in to one, as relays pass triggers.
-
-With the `Unit` above on a 1 ns clock, and a feeder on the same clock
-that wakes two of them:
-
-```rust
+// In the feeder's task:
 let wakes = &ctx.wakes().0;
 match ctx.now().ps() {
     0 => {
@@ -322,5 +380,36 @@ Both gates open just before 2 ns, and both units close them again when
 they run there. Unit 0's stays closed; unit 1's opens again from the next
 timepoint, by the `wake()` at 2 ns.
 
-For now, a model whose tasks wake runs on one worker
-([Workers](./running#workers)).
+**Who acts first decides whether a wake is in time.** A wake cannot make
+the woken task run in the timepoint that sends it. Whether that matters
+depends on the order of the two tasks in the cycle
+([Who acts first](./components#who-acts-first)):
+
+| Producer | Consumer | A value pushed while the consumer is closed is popped |
+|---|---|---|
+| `&'latest mut FifoTx` (acts second) | `&mut FifoRx` (acts first) | in the next cycle, as with the gate always open: in time |
+| `&mut FifoTx` (acts first) | `&'latest mut FifoRx`, triggered at `clock + delta(1)` | in the same cycle, as with the gate always open: in time |
+| `&mut FifoTx` (acts first) | `&'latest mut FifoRx`, at the same level | **a cycle late**: with the gate always open it is popped in the same cycle |
+
+In the third pairing, move the consumer to a later delta level, or keep
+its gate open while a value can arrive. To check a gated unit, run the
+same model with its gate never closing: the results must be the same, at
+the same cycles.
+
+**Through submodules.** `#[orr::wake(forward)]` passes wakes across a
+module's boundary:
+
+- on an `orr::Wake` field, it passes a submodule's wake out: the module's
+  init connects the submodule's wake to it, and the parent connects it as
+  it would a task's wake. A task does not wake through it.
+- on an `orr::WakeRelay` field, which may be an array, it passes wakes in:
+  the module's init connects it to a submodule's relays.
+
+Building the simulation fails when a forwarding wake has no wake
+connected to it, or a forwarding relay leads to no gate.
+
+**A wake or an ungated event.** The `wake` trigger in the example in
+[Clock gates](#clock-gates) is an ungated event: it runs the task when it
+arrives, and the task opens the gate. Use a wake when the woken unit finds
+its work in its own state or in its FIFOs; use an ungated event when the
+wake-up carries a value, or the unit must act at the moment it arrives.

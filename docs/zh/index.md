@@ -24,7 +24,7 @@ features:
       dark: /icons/deterministic-dark.svg
       width: 44
       height: 44
-    details: 一个 worker 还是多个，没有出错的运行，状态、事件和结束方式都完全相同；出错的运行，报出的是同一个错误。Orrery 在加载时推出模型的顺序，拒绝有歧义的写法，运行之后还可以对照检查。
+    details: 一个线程还是多个，没有出错的运行，状态、事件和结束方式都完全相同；出错的运行，报出的是同一个错误。Orrery 在加载时推出模型的顺序，拒绝有歧义的写法，运行之后还可以对照检查。
   - title: 用普通的 Rust 写模型
     icon:
       light: /icons/rust.svg
@@ -45,7 +45,7 @@ features:
       dark: /icons/speed-dark.svg
       width: 44
       height: 44
-    details: task 的函数体是编译好的 Rust；没有事件和唤醒的模型在一个 L3 域的多个核上并行运行，其余的目前在一个 worker 上运行。
+    details: task 的函数体是编译好的 Rust，模型里互不依赖的部分在一个 L3 域的多个核上并行运行。
   - title: 增量快照
     icon:
       light: /icons/snapshots.svg
@@ -61,3 +61,5 @@ features:
       height: 44
     details: 外部端口接入 trace、功能模型或 RTL 联合仿真；组件和接口都可以由用户自己定义。
 ---
+
+本指南对应 Orrery v2。页面和库不一致的地方，以库和它的 API 参考为准。

@@ -42,7 +42,7 @@ comments aside, is an error.
 
 **Visibility.** Parameters and submodules must be private. A parent sees
 exactly the fields of its direct children that are declared `pub` (state,
-triggers, interfaces), and nothing deeper: to reach a grandchild, the child
+triggers, interfaces, constants), and nothing deeper: to reach a grandchild, the child
 forwards it through a `pub` relay, reference or interface of its own.
 
 ## Arrays
@@ -66,6 +66,64 @@ workers: [Worker; orr::DynShape(worker_count)],
 - `[X; orr::DynShape(p)]`: the value of parameter `p` of the same module,
   per instance. The parameter is named directly; expressions are not
   allowed. Zero is an error.
+
+**A length that is a formula.** A `DynShape` length names one parameter,
+so a length that follows from others, the `sets` × `ways` lines of a cache
+say, is a parameter of its own. The driver computes it and writes it
+into the parameter file with the rest, and an `init` checks it: given a
+file with a wrong one, `SimPlan::new` fails with the init's message
+rather than building the wrong model.
+
+```rust
+#[orr::module]
+pub struct Cache {
+    #[orr::param("sets", default = 64usize)]
+    sets: usize,
+    #[orr::param("ways", default = 4usize)]
+    ways: usize,
+    #[orr::param("lines, sets x ways", default = 256usize)]
+    lines: usize,
+    #[orr::trigger]
+    clock: orr::Clock,
+    #[orr::reset(u64::MAX)]
+    tags: [u64; orr::DynShape(lines)],
+    next: u64,
+}
+
+#[orr::module_impl]
+impl Cache {
+    #[orr::init]
+    fn init(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
+        let module = ctx.module();
+        if *module.sets * *module.ways != *module.lines {
+            return Err(orr::SimError::new("lines must be sets x ways"));
+        }
+        ctx.init_clock(module.clock, orr::Time::ns(1), orr::Time::ps(0))
+    }
+
+    #[orr::task(triggers = (clock,))]
+    fn fill(ctx: &mut orr::TaskCtx, tags: &mut [u64], next: &mut u64) -> Result<(), orr::SimError> {
+        let (sets, ways) = (*ctx.module().sets, *ctx.module().ways);
+        let set = *next as usize % sets;
+        let way = *next as usize / sets % ways;
+        tags[set * ways + way] = *next;
+        *next += 1;
+        Ok(())
+    }
+}
+```
+
+The driver, which has read `sets` and `ways` from its own input:
+
+```rust
+let params = out_dir.join("params.toml");
+std::fs::write(&params, format!("[top]\nsets = {sets}\nways = {ways}\nlines = {}\n", sets * ways))?;
+let plan = orr::SimPlan::<Cache>::new(Some(params), None)?;
+```
+
+A plan takes its parameters only from a file
+([Running a simulation](./running)), so the driver writes one; next to
+the run's output, it also records what the run was given.
 
 Each element of a state array is its own location, ordered separately
 from the others. A value that should be one location (a buffer always
@@ -203,8 +261,8 @@ fn init_top(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
 | `ctx.init_clock(clock, period, phase)` | configures an independent clock, exactly once |
 | `ctx.init_clock_hz(clock, hz, phase)` | the same, by its frequency in hertz ([Clocks](./time#clocks)) |
 | `ctx.clock_info(clock)` | the `ClockInfo` of a clock, or of the clock a relay is connected to |
-| `ctx.connect(source, target)` | clock → clock relay, relay → relay, event source → event relay, relay → relay, wake → wake relay |
-| `ctx.set_const(constant, value)`, `ctx.get_const(constant)` | assigns a [constant](#constants), or reads one already assigned |
+| `ctx.connect(source, target)` | clock → clock relay, event source → event relay, wake → wake relay, relay → relay |
+| `ctx.set_const(handle, value)` / `ctx.get_const(handle)` | sets a [constant](#constants), exactly once / reads one an ancestor or this init set |
 | `ctx.share_state(state, reference)` | points a `StateRef` at a state, or at another reference; also for stores and external ports |
 | `ctx.connect_interface(&child_component, interface)` | binds an interface to a direct child component |
 | `ctx.share_interface(interface, child_interface)` | forwards an interface to a child |
@@ -214,15 +272,166 @@ not matter. `ctx.clock_info` is the exception: it sees only the clocks
 initialized and the relays connected so far. Inits run from the root
 down, so an `init` can read a clock it has initialized, a relay its
 ancestors connected, and a child's relay once it has connected it, but
-not a clock that a child's `init` configures. Every relay, reference and
-interface must be connected exactly once: an unconnected one, a second
-driver, a connection to a source and a cycle of references are errors.
+not a clock that a child's `init` configures.
+Every clock relay, event relay, reference and interface must
+be connected exactly once: an unconnected one, a second driver, a
+connection to a source and a cycle of references are errors. A wake relay
+is the exception: any number of wakes may be connected to it, none
+included, and connecting the same wake to it twice is an error. With none
+connected, nothing opens its gate through it, and no error says so: a
+forgotten wake connection leaves the unit asleep once it closes its gate.
+When a unit stops running for no visible reason, check its wake relay's
+connections first.
+
+A relay with nothing at its other end, such as an outward port of a
+router on the edge of a mesh, still needs a source. Give the parent
+sources that no task emits, and connect such relays to them:
+
+```rust
+#[orr::module]
+pub struct Line {
+    #[orr::param("nodes", default = 4usize)]
+    count: usize,
+    #[orr::trigger]
+    clock: orr::Clock,
+    /// Never emitted: what the two ends' outward ports are connected to.
+    #[orr::trigger]
+    nothing: [orr::EventSource<u64>; 2],
+    #[orr::submodule]
+    nodes: [Node; orr::DynShape(count)],
+}
+
+// In Line's init, after each node is connected to its neighbours:
+let (first, last) = (&module.nodes[0], &module.nodes[*module.count - 1]);
+ctx.connect(module.nothing[WEST], first.inputs[WEST])?;
+ctx.connect(module.nothing[EAST], last.inputs[EAST])?;
+```
+
+No task lists `nothing` in its `emits`, so nothing is ever sent on it:
+the two relays never trigger, and the run is the one it would be without
+them. Wrapping the edges round to the other side also runs, but then
+whether anything travels on those links depends on the nodes' code (that
+no node sends past an edge), which a reader has to go and check; the
+sources above say it in the connection.
+
+Give each such relay a source of its own, as the array above does. Two
+triggers of one task cannot both be connected to one source: building
+the plan fails with "subscribes to trigger … more than once".
 
 ## Constants {#constants}
 
-A constant is a value fixed for a run, such as a depth or another
-clock's `ClockInfo`, which an `init` assigns and tasks read. Unlike state,
-it is not in snapshots, and nothing writes it once it is assigned:
+A parameter comes from the parameter file. A **constant** is a value
+that `init` works out while the model is built, and that tasks only read:
+a unit's place in the model, a mode its parent chose, the period of a
+clock it does not run on. It is a field marked `#[orr::constant]`, of any
+type that is `Send + Sync + 'static`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Mode {
+    Plain,
+    Doubled,
+}
+
+#[orr::module]
+pub struct Unit {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+    #[orr::constant]
+    pub id: u64,              // assigned by the parent
+    #[orr::constant]
+    pub mode: Mode,
+    #[orr::constant]
+    pub weights: [u64; 3],    // an array is one constant
+    #[orr::constant]
+    step: u64,                // assigned by the unit itself
+    pub sum: u64,
+}
+
+#[orr::module_impl]
+impl Unit {
+    #[orr::init]
+    fn init(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
+        let module = ctx.module();
+        let id = *ctx.get_const(module.id)?;   // the parent's init ran first
+        ctx.set_const(module.step, id + 1)
+    }
+
+    #[orr::task(triggers = (clock,))]
+    fn tick(
+        _ctx: &mut orr::TaskCtx,
+        mode: &'constant Mode,
+        weights: &'constant [u64; 3],
+        step: &'constant u64,
+        sum: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        let k = if *mode == Mode::Doubled { 2 } else { 1 };
+        *sum += k * (weights.iter().sum::<u64>() + *step);
+        Ok(())
+    }
+}
+
+// In the parent's init, for each child:
+for (i, unit) in module.units.iter().enumerate() {
+    ctx.connect(module.clock, unit.clock)?;
+    ctx.set_const(unit.id, i as u64)?;
+    ctx.set_const(unit.mode, if i % 2 == 0 { Mode::Plain } else { Mode::Doubled })?;
+    ctx.set_const(unit.weights, [1, 2, 3])?;
+}
+```
+
+**Where it is set.** Only an `init` sets a constant, with
+`ctx.set_const(handle, value)`, and exactly once:
+
+- A module sets its own constants, `pub` or not. A parent sets its
+  children's `pub` ones; one that is not `pub` is not in the child's view,
+  so the parent cannot name it (a compile error, "no field"). A
+  grandchild's constant goes down level by level, each `init` setting its
+  children's.
+- Inits run from the root down, so a module's own `init` can read what its
+  parent set, with `ctx.get_const(handle)`, and work out other constants
+  from it (`step` above).
+- There is no default, and `#[orr::reset]` on a constant is a compile
+  error. A constant no `init` sets, and one set twice, are errors when the
+  plan is built (`SimPlan::new`), with the instance and the field: "constant
+  `core` is not assigned", "constant `core` is assigned twice".
+
+**How a task reads it.** A task reads a constant of its own module as a
+parameter named after the field, written `&'constant T`, with `T` the
+field's whole type:
+
+- `'constant` is required: `mode: &Mode` is a compile error that says to
+  write `&'constant T`, and so is `&'constant mut Mode`.
+- An array is one value: `weights: &'constant [u64; 3]` is the whole
+  array, not one location per element as a state array is.
+- A constant is not state. Reading it orders the task after nothing, and
+  it is not in snapshots: a run restored from a snapshot runs the inits
+  again, and they set the constants again.
+
+**Array lengths.** A constant cannot give an array its length: `[X; N]`
+takes a Rust constant ([Arrays](#arrays)), and `orr::DynShape(p)` a
+parameter of the same module; naming a constant there is a compile error
+("DynShape must reference a local param"). Neither can a trigger's `min_delay`. When a length or a delay
+follows from a value, make that value a parameter.
+
+**Parameter or constant.**
+
+| | Parameter | Constant |
+|---|---|---|
+| Set by | the parameter file, or its default | an `init`, in code |
+| Type | the [parameter types](#parameters) | any `Send + Sync + 'static` type |
+| Unset | keeps its default | an error |
+| Array length, `min_delay` | yes | no |
+| Read in a task | `*ctx.module().name` | a parameter `name: &'constant T` |
+
+A value the user should be able to change for a run is a parameter. A
+value that follows from where the instance sits in the model (its index,
+its stage), or that a parent works out from its own parameters, is a
+constant that the parent sets. A parent can pass one of its own
+parameters down that way, as a constant of each child.
+
+A module generic over a number can hand it to its tasks the same way, as
+a constant its own `init` sets:
 
 ```rust
 #[orr::module]
@@ -253,10 +462,6 @@ impl<const N: usize> Buffer<N> {
     }
 }
 ```
-
-The `init` of the module or of an ancestor assigns a constant, exactly
-once: a constant assigned twice, or never, is an error of `SimPlan::new`.
-A task reads it as `&'constant T`.
 
 ## Elaboration
 

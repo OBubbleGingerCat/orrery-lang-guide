@@ -24,7 +24,7 @@ features:
       dark: /icons/deterministic-dark.svg
       width: 44
       height: 44
-    details: On one worker or several, the same state, events and end for a run without an error, and the same error for one that fails. Orrery works out the model's ordering when it loads it, rejects what is ambiguous, and can check a run against it.
+    details: On one thread or several, the same state, events and end for a run without an error, and the same error for one that fails. Orrery works out the model's ordering when it loads it, rejects what is ambiguous, and can check a run against it.
   - title: Models in plain Rust
     icon:
       light: /icons/rust.svg
@@ -45,7 +45,7 @@ features:
       dark: /icons/speed-dark.svg
       width: 44
       height: 44
-    details: Task bodies are compiled Rust, and models without events or wakes run in parallel on the cores of one L3 domain; the others run on one worker for now.
+    details: Task bodies are compiled Rust, and the parts of a model that do not depend on each other run in parallel on the cores of one L3 domain.
   - title: Incremental snapshots
     icon:
       light: /icons/snapshots.svg
@@ -61,3 +61,5 @@ features:
       height: 44
     details: External ports bring in traces, functional models or RTL co-simulation; components and interfaces can be user-defined.
 ---
+
+This guide is for Orrery v2. Where a page and the library disagree, the library and its API reference are right.

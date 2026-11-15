@@ -90,4 +90,28 @@ model itself.
   windows of 10,000 cycles.
 
 Every case and every benchmark must match exactly, in the plain loop and
-in Orrery, on one worker or several.
+in Orrery on any number of threads.
+
+## Build and run
+
+From the Orrery repository:
+
+```sh
+cargo build --release -p gpgpu-sim-model --bin gpgpu-sim-orrery
+target/release/gpgpu-sim-orrery --trace <dir> --workers 4 > stats.log
+```
+
+- `--trace <dir>` is the `traces` directory of one benchmark, as
+  Accel-Sim's tracer writes it.
+- The statistics go to standard output, in GPGPU-Sim's format. The last
+  line on standard error is the length of the run and its time:
+  `<cycles> cycles in <seconds>s (…)`; the time includes building the
+  simulation.
+- `--workers <n>` runs on *n* threads ([Threads](../guide/running#threads));
+  `--plain` runs the plain loop instead of Orrery.
+- `--windows <file>` writes the event log as hashes in windows of 10,000
+  cycles, the form the reference's log is compared in; `--log <file>`
+  writes the whole log.
+- `--params <toml>` changes the model's parameters, and
+  `--reports off|warnings|all` what is printed as the simulation is
+  built and stopped (`SimConfig::reports`).

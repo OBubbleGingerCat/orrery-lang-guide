@@ -80,8 +80,8 @@ Binding is by port, not by type: two ports of the same type get two
 sources. An unbound port, or one bound twice, fails the load
 ([Errors](./errors#when-the-simulation-loads)). Between runs,
 `sim.state_mut(handle)` gives the host the source object back. Ports do
-not keep a model on one worker: a model with ports runs on several, as
-long as nothing else keeps it on one ([Workers](./running#workers)).
+not keep a model on one thread: a model with ports runs on several
+([Threads](./running#threads)).
 
 A port can be shared with other modules like state, through an
 `orr::StateRef<orr::External<S>>` connected with `ctx.share_state`. Ports
