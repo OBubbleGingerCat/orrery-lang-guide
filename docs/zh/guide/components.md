@@ -38,6 +38,18 @@ pub enum Op {
 
 在 task 里，加载时确定容量的容器以它的 `Dyn` 形式出现（`orr::DynQueue<T>`），辅助函数接收的也是这种形式。
 
+`orr::Queue<T, N>` 和 `orr::DynQueue<T>` 有下面这些方法；每种容器的全部方法见 API 参考（`cargo doc -p orrery-lang --open`）：
+
+| 方法 | 返回 |
+|---|---|
+| `push(value: T)` | `Result<(), T>`：队列满了就把值还回来 |
+| `pop()` | `Option<T>`：队头元素，原来的槽里留下 `T::default()` |
+| `front()`、`back()`、`get(index)` | `Option<&T>`，`get(0)` 是队头；`front_mut()`、`back_mut()`、`get_mut(index)` 给 `Option<&mut T>` |
+| `iter()` | 从队头到队尾的元素，类型是 `&T` |
+| `len()`、`capacity()` | `usize` |
+| `is_empty()`、`is_full()` | `bool` |
+| `clear()` | 不返回值；清空队列 |
+
 ## 组件
 
 **组件**是一个可复用的模块，别的模块通过**接口**使用它。Orrery 的标准组件是
@@ -153,6 +165,8 @@ push 的值能不能在本周期 pop 出来？本周期腾出的槽能不能再�
 | `&mut FifoTx` | `&'latest mut FifoRx` | 生产者先动作：push 的值可以在同一周期 pop；腾出的槽从下一周期起才能再用 |
 
 两侧都是 `&mut`，或者都是 `&'latest mut`，就构成一个顺序环，在仿真加载时报错，错误信息里给出两个 task 和这个 FIFO 的状态（[报错](./errors#when-the-simulation-loads)）。顺序属于 task，不属于组件，而且只在两者都运行的时刻点才有意义（比如两个时钟相遇的地方）。
+
+**两头都晚一拍的队列**：第 *k* 拍压进的值从 *k* + 1 拍起才能弹出，第 *k* 拍空出的槽从 *k* + 1 拍起才能再填。上面两行单用哪一行都不是。让生产者先动作，并经一个 `orr::Fifo<orr::Due<T>>` 把每个值压成晚一个沿到期（[延迟](#delays)）：生产者这边 `push_due(value, clock.nth_edge_from(now, NonZeroU64::MIN))`，消费者那边 `pop_due(now)`。这样消费者从下一拍起才看见值，生产者从下一拍起才看见空出的槽。还没到期的值在 FIFO 里占着位置，和两头各有一级寄存器的队列一样。
 
 一个 task 同时持有同一个 FIFO 的两侧，只能是为了看两侧：`&FifoTx<T>` 和 `&FifoRx<T>`，看到的是周期开始时的整个 FIFO。只要有一侧是 `&mut` 或 `&'latest mut`，或者一侧是 `&`、另一侧是 `&'latest`（同一个计数要在周期里两个不同的时候去读），就在构建 plan 时报错：
 

@@ -55,8 +55,9 @@ are still to come; they will add their items here.
   ([chapter 5](./lines))?
 - In a typical cycle, how many instances work, and are they neighbours?
   Did I try `Dealt` ([chapter 10](./threads))?
-- What is *R* on 8 threads? How many execution units are there on 1, 2,
-  4 and 8 threads ([chapter 10](./threads))?
+- Did I run each kind of input once on 1 thread and once on the most,
+  and keep the faster? How many execution units are there on each
+  ([chapter 10](./threads))?
 - Is there a kind of task that runs, or keeps its gate closed, in every
   cycle while doing almost nothing ([chapter 10](./threads))?
 

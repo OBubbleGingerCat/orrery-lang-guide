@@ -43,6 +43,19 @@ fixed at compile time (`Queue<T, 8>`) or per instance when the model loads
 Inside a task, a load-time container appears in its `Dyn` form
 (`orr::DynQueue<T>`), which is also what helper functions take.
 
+`orr::Queue<T, N>` and `orr::DynQueue<T>` have these methods; the API
+reference (`cargo doc -p orrery-lang --open`) lists every container's:
+
+| Method | Returns |
+|---|---|
+| `push(value: T)` | `Result<(), T>`: the value back when the queue is full |
+| `pop()` | `Option<T>`: the front element, leaving `T::default()` in its slot |
+| `front()`, `back()`, `get(index)` | `Option<&T>`, `get(0)` being the front; `front_mut()`, `back_mut()`, `get_mut(index)` give `Option<&mut T>` |
+| `iter()` | the elements as `&T`, front to back |
+| `len()`, `capacity()` | `usize` |
+| `is_empty()`, `is_full()` | `bool` |
+| `clear()` | nothing; it empties the queue |
+
 ## Components
 
 A **component** is a reusable module that others use through an
@@ -167,6 +180,16 @@ the simulation loads, naming both tasks and the FIFO's state
 ([Errors](./errors#when-the-simulation-loads)). The order belongs to the
 tasks, not to the component, and only matters in timepoints where both
 run (where two clocks meet, say).
+
+**A queue a cycle late at both ends**, where a value pushed in cycle *k*
+can be popped from *k* + 1 and a slot freed in cycle *k* can be filled
+from *k* + 1, is neither row alone. Let the producer act first, and push
+each value due one edge on, through an `orr::Fifo<orr::Due<T>>`
+([Delays](#delays)): `push_due(value, clock.nth_edge_from(now,
+NonZeroU64::MIN))` on the producer's side, `pop_due(now)` on the
+consumer's. The consumer then sees a value from the next cycle, and the
+producer sees a freed slot from the next cycle. A value not yet due takes
+its place in the FIFO, as in a queue with registers at both ends.
 
 One task holds both sides of one FIFO only to look at both, as
 `&FifoTx<T>` and `&FifoRx<T>`: it sees the whole FIFO as the cycle began.
