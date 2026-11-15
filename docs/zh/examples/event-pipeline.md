@@ -41,4 +41,16 @@ workers[1].sink.total = 660
 workers[2].sink.total = 66
 ```
 
-它的 producer 发出事件，所以目前在一个 worker 上运行（[worker](../guide/running#workers)）。
+不论用几个线程，得到的数都一样。
+
+## 构建和运行 {#build-and-run}
+
+模型是 Orrery 仓库里 `bench/models/event_pipeline` 下的包 `event-pipeline-model`。它是一个库，没有自己的程序：要运行它，在你自己的 crate 里依赖它，
+
+```toml
+[dependencies]
+orrery-lang = { path = "<orrery>/crates/orrery-lang" }
+event-pipeline-model = { path = "<orrery>/bench/models/event_pipeline" }
+```
+
+再照[快速开始](../guide/getting-started#running-it)写一个 `main`，顶层模块用 `event_pipeline::top::Top`。然后 `cargo run --release -- params.toml` 打印出上面那些总数。

@@ -193,6 +193,59 @@ where they run together, that is a write conflict when the simulation
 loads. Other tasks may still look at a side
 ([Looking without popping](#looking-without-popping)).
 
+**Two units that send to each other.** When each of two units pushes into
+a FIFO that the other pops (a request path and its reply path, two
+neighbours in a mesh), one task per unit that both pops its inbox and
+pushes its outbox is an ordering cycle, whichever sides are
+`&'latest mut`: one FIFO puts A before B, the other B before A.
+
+```text
+dependency cycle (triggered by clock top.clock (1ns phase 0ps)): %OneTask.step at top.a reads top.ba.slots (curr) before %OneTask.step at top.b writes it; %OneTask.step at top.b reads top.ab.slots (curr) before %OneTask.step at top.a writes it
+```
+
+Give each unit a task that takes, acting first, and one that sends,
+acting after; every unit's `take` then runs before every unit's `send`:
+
+```rust
+#[orr::module]
+pub struct Node {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+    #[orr::interface]
+    pub out: orr::FifoTx<u64>,
+    #[orr::interface]
+    pub inbox: orr::FifoRx<u64>,
+    pub got: u64,
+    sent: u64,
+}
+
+#[orr::module_impl]
+impl Node {
+    // Every node takes first, as the consumer of its inbox ...
+    #[orr::task(triggers = (clock,))]
+    fn take(_ctx: &mut orr::TaskCtx, inbox: &mut orr::FifoRx<u64>, got: &mut u64) -> Result<(), orr::SimError> {
+        if let Some(value) = inbox.pop() {
+            *got += value;
+        }
+        Ok(())
+    }
+
+    // ... and sends after, as the producer of its outbox.
+    #[orr::task(triggers = (clock,))]
+    fn send(_ctx: &mut orr::TaskCtx, out: &'latest mut orr::FifoTx<u64>, sent: &mut u64) -> Result<(), orr::SimError> {
+        *sent += 1;
+        let _ = out.push(*sent);
+        Ok(())
+    }
+}
+```
+
+Where the link has a latency anyway, send over it with events whose
+source declares that latency as its minimum
+([Declared delays](./time#declared-delays)): nothing sent in a cycle
+arrives in that cycle, the units need no order within it, and one task
+per unit is enough.
+
 ## Looking without popping
 
 Sometimes several tasks need to see what waits in a FIFO while only one
@@ -204,12 +257,15 @@ the methods that only look: `front`, `get(i)`, `len`, `is_empty`,
 one task that pops from it; they cannot change it, and `pop` through a
 `&FifoRx` does not compile.
 
-What a looking task sees of the current cycle:
+What a task sees of the current cycle, by the form it takes a side in,
+and where it runs:
 
-| Form | The other side's changes | Its own side's changes |
-|---|---|---|
-| `&FifoRx` | not seen | not seen |
-| `&'latest FifoRx` | seen | not seen |
+| Form | Sees the other side's changes this cycle | Sees this side's writer this cycle | Runs |
+|---|---|---|---|
+| `&mut` | no | it is the writer | before the other side |
+| `&'latest mut` | yes | it is the writer | after the other side |
+| `&` | no | no | before the writers of both sides |
+| `&'latest` | yes | no | after the other side's writer, before this side's |
 
 On the consumer's end, `&FifoRx` sees the FIFO as the cycle began, before
 this cycle's push and before this cycle's pop. `&'latest FifoRx` sees
@@ -224,6 +280,9 @@ place: that is an ordering cycle, an error when the simulation loads
 ([Errors](./errors#when-the-simulation-loads)). `&FifoRx` fits either
 order. Arrays work alike: `&[orr::FifoRx<T>]` and
 `&'latest [orr::FifoRx<T>]`.
+A looking task takes its place in the cycle's order like any task: `&`
+before the writers of both sides, `&'latest` between them. A task that
+looks at many FIFOs is ordered against the writers of all of them.
 
 A complete example: the producer acts first and pushes a value every
 cycle, the consumer pops one every cycle, and two more tasks of the
@@ -317,6 +376,103 @@ impl Consumer {
 the FIFO empty, `look` finds the value just pushed, and `receive` then
 pops it: after ten cycles (0 to 9 ns), `waiting` is 0, `newest` is 10 and
 `sum` is 55.
+
+## Delays {#delays}
+
+A value that becomes visible a fixed number of cycles after it is made (a
+pipeline's latency, a wire, a memory's access time) is stored together
+with the edge it is due at, as an `orr::Due<T>`: `value`, and `at`, the
+due edge in femtoseconds. Its consumer sees it at a time strictly after
+`at`; on the same clock, that is *n* cycles after it was handed on with a
+delay of *n* edges.
+
+- `clock.nth_edge_from(now, n)` is the due edge of a value handed on at
+  `now` with a delay of *n* edges (*n* a `NonZeroU64`). It counts from the
+  first edge at or after `now`, and an edge is at delta 0: from a task
+  that runs at a later delta level (`clock + delta(k)`), it counts from
+  the next edge, and the value is a cycle late. Such a task counts from
+  `orr::Timepoint::at_fs(ctx.now().fs())`, delta 0 of its time.
+- `orr::DelayQueue<T, N>` (`orr::DynDelayQueue<T>` when sized at load) is
+  a queue of such values in a module's state. `push_due(value, due)`
+  appends, or hands the value back when full; `front_due(now)` and
+  `pop_due(now)` give the front value only once it is seen. It also has
+  the queue's `front`, `len`, `is_empty`, `is_full`, `iter`, ….
+- Between two modules, an `orr::Fifo<orr::Due<T>>` does the same: the
+  producer's `push_due(value, due)`, the consumer's `front_due(now)` and
+  `pop_due(now)`.
+- Only the front is looked at, so values come out in the order they went
+  in: one queue fits one fixed delay.
+- These compare femtoseconds, for a consumer that runs at a clock edge. A
+  consumer that runs on an event, at any delta, uses `is_due_exact`,
+  `front_due_exact` and `pop_due_exact`.
+
+A unit that waits for its delays closes its gate until its front value is
+seen, `gate.close_until(clock.edge_after(orr::Timepoint::at_fs(front.at)))`,
+and the unit that hands it a value wakes it for the edge the value is
+seen, `wake_after(orr::wake_delay(now, clock, n)?)`
+([Wakes](./time#wakes)). A memory that answers each
+request `LATENCY` edges after it takes it, and sends the answer on a
+wire of `WIRE` edges:
+
+```rust
+#[orr::module]
+pub struct Memory {
+    #[orr::trigger(gate = gate)]
+    pub clock: orr::ClockRelay,
+    #[orr::wake(gate = gate)]
+    pub wake: orr::WakeRelay,
+    #[orr::interface]
+    pub requests: orr::FifoRx<u64>,
+    #[orr::interface]
+    pub answers: orr::FifoTx<orr::Due<u64>>,
+    pub sink: orr::Wake,
+    pub gate: orr::Gate,
+    pending: orr::DelayQueue<u64, 8>,
+}
+
+#[orr::module_impl]
+impl Memory {
+    #[orr::task(triggers = (clock,), wakes = (sink,))]
+    fn cycle(
+        ctx: &mut orr::TaskCtx,
+        requests: &mut orr::FifoRx<u64>,
+        answers: &'latest mut orr::FifoTx<orr::Due<u64>>,
+        pending: &mut orr::DelayQueue<u64, 8>,
+        gate: &mut orr::Gate,
+    ) -> Result<(), orr::SimError> {
+        let clock = ctx.triggered_triggers().0.expect("runs on its clock");
+        let now = ctx.now();
+        // An answer whose latency is over goes out, due WIRE edges on.
+        if pending.front_due(now).is_some() && !answers.is_full() {
+            let address = pending.pop_due(now).expect("due");
+            answers.push_due(address * 10, clock.nth_edge_from(now, WIRE)).expect("not full");
+            ctx.wakes().0.wake_after(orr::wake_delay(now, clock, WIRE)?)?;
+        }
+        // A new request is answered LATENCY edges on.
+        if !pending.is_full() {
+            if let Some(address) = requests.pop() {
+                pending.push_due(address, clock.nth_edge_from(now, LATENCY)).expect("not full");
+            }
+        }
+        // Nothing to do until the next request, or until the oldest
+        // request's latency is over.
+        if requests.is_empty() {
+            match pending.front() {
+                Some(oldest) => gate.close_until(clock.edge_after(orr::Timepoint::at_fs(oldest.at))),
+                None => gate.close(), // until the source wakes it
+            }
+        }
+        Ok(())
+    }
+}
+```
+
+With `LATENCY` 5 and `WIRE` 3 (`NonZeroU64` constants), a request that a
+source acting after the memory pushes at edge 10 is taken at edge 11, its answer leaves at edge 16 and is seen at
+edge 19. The unit that takes the answers pops them with `pop_due(now)` and
+closes its gate the same way. For a value due on one clock and seen on
+another, `orr::delay_to_edge(now, clock, n, consumer_clock)` is the delay
+to [emit an event](./time#events) with.
 
 ## Arrays and forwarding
 

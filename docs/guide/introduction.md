@@ -28,8 +28,7 @@ fn issue(ctx: &mut orr::TaskCtx,
 From these declarations alone, Orrery derives every ordering in the
 model. It rejects a model whose order would be ambiguous, runs the rest in
 parallel, and guarantees that the result is the one a serial run would
-give, whatever the number of workers. For now, a model whose tasks send
-events or wake gates runs on one worker ([Workers](./running#workers)).
+give, whatever the number of threads.
 
 ## What a model is made of
 
@@ -49,13 +48,12 @@ events or wake gates runs on one worker ([Workers](./running#workers)).
 
 ## What you get
 
-- **The same results in every configuration.** One worker or several:
+- **The same results in every configuration.** One thread or several:
   a run that ends without an error gives the same final state, events and
   end, and when a model fails, it reports the same error. What the state
   holds after the error is in [Errors](./errors#which-error-is-reported).
 - **Speed.** Models run on several cores, with nothing to synchronize by
-  hand: for now, the cores of one L3 domain, for models whose tasks send no
-  events and wake no gates.
+  hand: for now, the cores of one L3 domain.
 - **Snapshots** at regular boundaries, to restore and reproduce a
   problem.
 - **Errors at load time** for most modeling mistakes (two writers of one

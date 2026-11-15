@@ -60,7 +60,7 @@
 
   对 FIFO 来说，这就是两侧都声称自己先动作，或者都声称在后（[组件](./components#who-acts-first)），或者消费者先动作时有 task 用 `&'latest FifoRx` 看消费者一端（[组件](./components#looking-without-popping)）。
 
-**配置**（`LoadError::Config`，带字段名）：`delta_limit` 超过 62，`groups` 不是 1，`workers_per_group` 为 0 或者超过一个 L3 域容得下的数目，以及多个 worker 目前还不能运行的东西（[worker](./running#workers)）。
+**配置**（`LoadError::Config`，带字段名）：`delta_limit` 超过 62，`groups` 不是 1，`workers_per_group` 为 0，`slots` 不是 2 到 1024 之间的 2 的幂；多线程时，运行能用的 CPU 里没有哪个 L3 域给每个线程凑得出一个空闲的物理核（字段 `cpus`），以及多线程运行目前还不收的东西（字段 `parallel`）（[线程](./running#threads)）；开了 `checks` 时，它检查不了的模型（字段 `checks`）。
 
 **初始化**（`LoadError::Init`，带 `stage`）：
 
@@ -72,7 +72,7 @@
 
 ### 警告 {#warnings}
 
-只是*可能*发生的冲突和环（因为涉及事件）则是警告，在仿真运行时检查。加载时把每条警告打印到 stderr，`warning: ...`，除非 `reports` 是 `Off`；警告也留在加载的报告里：
+只是*可能*发生的冲突和环（因为涉及事件）则是警告，在仿真运行时检查。加载时把每条警告打印到 stderr，每条一行 `warning: …`，除非 `reports` 是 `Off`（`SimConfig::reports`）；警告也留在加载的报告里：程序可以从 `sim.load_report().warnings` 读到同样的几行（前面没有 `warning: `），不管 `reports` 设成什么：
 
 ```rust
 for warning in &sim.load_report().warnings {
@@ -80,10 +80,48 @@ for warning in &sim.load_report().warnings {
 }
 ```
 
+警告有三种：
+
+- 因为涉及事件而*可能*发生的写冲突或顺序环；运行时检查，真的发生了就让运行失败（[运行时](#while-it-runs)）：
+
+  ```text
+  possible write conflict, checked at run time: %MayConflict.on_a at top and
+  %MayConflict.on_b at top both write top.value (triggered by event top.a_out
+  and event top.b_out)
+  ```
+
+- 提示，以 `hint: ` 开头；
+- 多线程时，执行单元比 worker 少（[线程](./running#threads)）。
+
+最后一种取决于线程数：同一个模型，`sim.load_report().warnings` 可能在 1 个线程时是空的，4 个线程时不是。要在测试里断言模型没有可能的冲突、没有可能的环，而且不管线程数：
+
+```rust
+let graph = sim.model_graph();
+assert!(graph.runtime_conflicts().is_empty() && graph.blocks().is_empty());
+```
+
+## 打印错误 {#printing-an-error}
+
+`main` 返回 `Result`、用 `?` 把错误往外传时，Rust 打印的是错误的 `Debug` 形式，不好读。要一行清楚的话，自己用 `{}` 打印：
+
+```rust
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let plan = orr::SimPlan::<WriteConflict>::new(None, None)?;
+    let mut sim = orr::Sim::new(plan, orr::SimConfig::default())?;
+    sim.run_until(orr::Time::ns(10))?;
+    Ok(())
+}
+```
+
 ```text
-possible write conflict, checked at run time: %MayConflict.on_a at top and
-%MayConflict.on_b at top both write top.value (triggered by event top.a_out
-and event top.b_out)
+error: write conflict: %WriteConflict.bump at top and %WriteConflict.clear at top both write top.value (both triggered by clock top.clock (1ns phase 0ps))
 ```
 
 ## 运行时 {#while-it-runs}
@@ -113,18 +151,18 @@ and event top.b_out)
 
 ### 报的是哪个错误 {#which-error-is-reported}
 
-不止一处失败时，Orrery 报串行顺序里最早的那一个：一次只跑一个 task 的运行会按什么顺序碰到它们，就按什么顺序，即逐个时刻点，在一个时刻点之内按一个符合访问模式的固定顺序。同一个模型、同一个输入，不管用几个 worker，报的都是同一个错误。
+不止一处失败时，Orrery 报串行顺序里最早的那一个：一次只跑一个 task 的运行会按什么顺序碰到它们，就按什么顺序，即逐个时刻点，在一个时刻点之内按一个符合访问模式的固定顺序。同一个模型、同一个输入，不管用几个线程，报的都是同一个错误。
 
 - 只会发生在 stop 终点之后的失败不报：运行按 stop 结束（[停止](./running#stopping)）。
 - 开了 `fail_on_drop` 时，被丢弃的事件让它所在的时刻点失败，这个时刻点的 task 一个也不运行。
 - 一个 task 发出的事件造成了多驱动，之后它又返回错误或 panic：报多驱动。
 
-出错之后，串行顺序里在失败之前的一切都已经运行，宿主可以用 `sim.state` 读出它留下的状态。失败的 task 可能只写了一部分，在它之后的工作也可能已经运行：这一部分状态没有规定，也可能随 worker 数而不同。之后的每次 `run_until` 和 `step` 都返回错误。
+出错之后，串行顺序里在失败之前的一切都已经运行，宿主可以用 `sim.state` 读出它留下的状态。失败的 task 可能只写了一部分，在它之后的工作也可能已经运行：这一部分状态没有规定，也可能随线程数而不同。之后的每次 `run_until` 和 `step` 都返回错误。
 
 ## 调试
 
 - **单步运行。** `sim.step()` 运行一个时刻点；`sim.next_timepoint()` 给出是哪个。在两步之间用 `sim.state(handle)` 查看状态。
-- **检查运行。** 用 `SimConfig { checks: true, .. }`、一个 worker 时，运行之后 `sim.check_trace()` 检查访问同一个状态、其中至少一个是写的每两次访问都按串行顺序运行了。
-- **比较不同的 worker 数。** 对能用多个 worker 运行的模型，没有出错的运行的结果，以及运行报出的错误，从不取决于 worker 数。如果一个模型在不同的 worker 数下给出的这些结果不同，那是 Orrery 的 bug。出错之后读出的状态可以不同，见[报的是哪个错误](#which-error-is-reported)：这不是 bug。
+- **检查运行。** 用 `SimConfig { checks: true, .. }` 时，运行之后 `sim.check_trace()` 检查访问同一个状态、其中至少一个是写的每两次访问都按串行顺序运行了。它用于测试：记下的东西随运行长度增长，占的内存和时间也随之增长。
+- **比较不同的线程数。** 没有出错的运行的结果，以及运行报出的错误，从不取决于线程数。如果一个模型在不同的线程数下给出的这些结果不同，那是 Orrery 的 bug。出错之后读出的状态可以不同，见[报的是哪个错误](#which-error-is-reported)：这不是 bug。
 - **快照与恢复。** 在长时间的运行中拍快照，恢复到问题之前的那一个，再用 `step`
   循环或更多的日志排查（[快照](./snapshots)）。

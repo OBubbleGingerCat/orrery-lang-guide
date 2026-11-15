@@ -12,7 +12,7 @@ Top
 
 ## 准备 {#setting-up}
 
-Orrery 没有发布到 crates.io。从你能访问的一份检出依赖它：
+Orrery 没有发布到 crates.io。本指南对应 Orrery v2。从你能访问的一份检出依赖它：
 
 ```toml
 [dependencies]
@@ -148,7 +148,7 @@ impl Top {
 - `[Worker; orr::DynShape(worker_count)]` 是一个数组，长度是参数
   `worker_count`。
 
-## 运行
+## 运行 {#running-it}
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -171,13 +171,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - `SimPlan::new` 读取参数（给的是 `None` 时用默认值），建立实例，运行各个
   `init`，并检查连接。
-- `orr::Sim::new` 加载仿真，这里用的是默认配置，一个 worker（[运行仿真](./running#configuration)）。它还会检查各个 task 的先后。
+- `orr::Sim::new` 加载仿真，这里用的是默认配置，一个线程（[运行仿真](./running#configuration)）。它还会检查各个 task 的先后。
 - `run_until` 运行 100 ns 及之前的每个时刻点。时钟沿落在 0、10、…、100 ns，所以每个 sink 最后是 1 + 2 + … + 11 = 66。
 - `sim.top()` 给出模型状态的句柄，用 `sim.state` 读取。
 
 ## 参数
 
-参数来自一个 TOML 文件，文件里的表按实例树组织。三个 worker，第二个每次加十：
+参数来自一个 TOML 文件，文件里的表按实例树组织；上面的 `main` 把文件路径当第一个命令行参数（`cargo run --release -- params.toml`）。三个 worker，第二个每次加十：
 
 ```toml
 [top]
