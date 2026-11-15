@@ -45,5 +45,22 @@ workers[1].sink.total = 660
 workers[2].sink.total = 66
 ```
 
-Its producers send events, so for now it runs on one worker
-([Workers](../guide/running#workers)).
+The same numbers come out on any number of threads.
+
+## Build and run
+
+The model is the package `event-pipeline-model`, in
+`bench/models/event_pipeline` of the Orrery repository. It is a library,
+with no program of its own: to run it, depend on it from a crate of
+yours,
+
+```toml
+[dependencies]
+orrery-lang = { path = "<orrery>/crates/orrery-lang" }
+event-pipeline-model = { path = "<orrery>/bench/models/event_pipeline" }
+```
+
+and write a `main` like the one in
+[Getting started](../guide/getting-started#running-it), with
+`event_pipeline::top::Top` as the top module. `cargo run --release --
+params.toml` then prints the totals above.

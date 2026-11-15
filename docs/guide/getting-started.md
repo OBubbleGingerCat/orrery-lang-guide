@@ -13,8 +13,8 @@ Top
 
 ## Setting up
 
-Orrery is not published on crates.io. Depend on it from a checkout you
-have access to:
+Orrery is not published on crates.io. This guide is for Orrery v2.
+Depend on it from a checkout you have access to:
 
 ```toml
 [dependencies]
@@ -180,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   `None`), builds the instances, runs the `init`s and checks the
   connections.
 - `orr::Sim::new` loads the simulation, here with the default
-  configuration, one worker ([Running a simulation](./running#configuration)).
+  configuration, one thread ([Running a simulation](./running#configuration)).
   It also checks how the tasks are ordered.
 - `run_until` runs every timepoint up to 100 ns. The clock ticks at 0, 10,
   …, 100 ns, so each sink ends at 1 + 2 + … + 11 = 66.
@@ -188,8 +188,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Parameters
 
-Parameters come from a TOML file whose tables follow the instance tree.
-Three workers, the second counting in tens:
+Parameters come from a TOML file whose tables follow the instance tree;
+the `main` above takes its path as the first argument
+(`cargo run --release -- params.toml`). Three workers, the second
+counting in tens:
 
 ```toml
 [top]

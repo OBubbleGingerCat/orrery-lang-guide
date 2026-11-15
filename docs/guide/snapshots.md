@@ -42,16 +42,13 @@ twenty digits wide (`00000000100000000000.fs.orrs` for 100 µs);
 `orr::snapshot_path(dir, time)` gives the full name. A snapshot appears
 under that name only once it is completely written.
 
-For now, snapshots are taken and restored on one worker: a simulation
-with snapshots configured, or restored from one, fails to load on more
-(`LoadError::Config`, [Workers](./running#workers)).
-
 ## Best effort
 
 The simulation can run on while a snapshot is being written. A boundary
 is **skipped** if the previous snapshot is still being written when the
-run reaches it. Every snapshot that is written is exact, and taking
-snapshots never changes the results of a run.
+run reaches it. Every snapshot that is written is exact, and the same on
+any number of threads, and taking snapshots never changes the results of
+a run.
 
 ```rust
 if let Some(status) = sim.wait_snapshots() {
@@ -90,8 +87,9 @@ sim.run_until(orr::Time::ms(5))?;   // continues exactly as the original run
 ```
 
 An incremental snapshot finds the files it builds on by name, in the same
-directory. The restored simulation may use a different configuration, still
-on one worker; it continues exactly as the original run would have:
+directory. The restored simulation may use a different number of threads
+or a different configuration; it continues exactly as the original run
+would have:
 
 - events in flight at the boundary arrive as they would have, and gates,
   dropped events and gated edges carry on from where they were;

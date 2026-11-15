@@ -16,6 +16,19 @@ const guide: Page[] = [
   ['running', 'Running a simulation', '运行仿真'],
   ['snapshots', 'Snapshots', '快照'],
   ['errors', 'Errors and debugging', '报错与调试'],
+  ['migrating', 'Migrating from the previous version', '从上一版迁移'],
+]
+
+const tutorial: Page[] = [
+  ['', 'Writing models well', '把模型写好'],
+  ['measure', '1. Measure first', '1. 先量'],
+  ['gates', '2. Close the gate of an idle unit', '2. 闲着就关门'],
+  ['due', '3. Close until the next deadline', '3. 关到下一个到期的沿'],
+  ['wakes', '4. Wake in time', '4. 叫醒要赶得上'],
+  ['lines', '5. Lines and delays', '5. 连线和延迟'],
+  ['arbitration', '8. Arbitration across modules', '8. 跨模块的仲裁'],
+  ['threads', '10. Getting faster with more threads', '10. 多开线程更快'],
+  ['checklist', 'The whole checklist', '总核对单'],
 ]
 
 const examples: Page[] = [
@@ -32,6 +45,7 @@ function sidebar(zh: boolean): DefaultTheme.Sidebar {
   const prefix = zh ? '/zh' : ''
   const groups: [string, string, string, Page[]][] = [
     ['guide', 'Guide', '用法', guide],
+    ['tutorial', 'Tutorial', '教程', tutorial],
     ['examples', 'Examples', '示例', examples],
   ]
   return Object.fromEntries(
@@ -50,6 +64,7 @@ function nav(zh: boolean): DefaultTheme.NavItem[] {
   const prefix = zh ? '/zh' : ''
   return [
     { text: zh ? '用法' : 'Guide', link: `${prefix}/guide/introduction`, activeMatch: `${prefix}/guide/` },
+    { text: zh ? '教程' : 'Tutorial', link: `${prefix}/tutorial/`, activeMatch: `${prefix}/tutorial/` },
     { text: zh ? '示例' : 'Examples', link: `${prefix}/examples/gpgpu-sim`, activeMatch: `${prefix}/examples/` },
   ]
 }

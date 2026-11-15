@@ -45,7 +45,31 @@ runs, the gated edges and a checksum.
 
 ## What it shows
 
-Every configuration prints a checksum, which every number of workers must
-agree on. For now, the lanes and the mesh, whose tasks send events, run on
-one worker; the gated units run on several
-([Workers](../guide/running#workers)).
+Every configuration prints a checksum, which every number of threads must
+agree on.
+
+## Build and run
+
+From the Orrery repository, with one of the parameter files in
+`bench/models/event_bench/params/`:
+
+```sh
+cargo build --release -p event-bench-model --bin event-bench
+target/release/event-bench --params bench/models/event_bench/params/light.toml --workers 4
+target/release/event-bench --model mesh --hop timed --params bench/models/event_bench/params/mesh_light.toml
+target/release/event-bench --model gated --params bench/models/event_bench/params/gated_turns.toml
+```
+
+```text
+tokens 160016 checksum a834b91aff890990
+10000 cycles in 0.192s (19.2 µs per cycle, 0.071s to load)
+```
+
+- `--model plain|mixed|mesh|mesh_goal|gated` picks the shape (lanes by
+  default; `mixed` adds the clocked stages), `--hop delta|timed` the
+  hops between stages, `--cycles <n>` the length (10,000 by default),
+  `--workers <n>` the threads ([Threads](../guide/running#threads)).
+- A parameter file for another `--model` than the lanes says so in its
+  first lines.
+- The first line is the result, the same on any number of threads; the
+  second the time, with the time to build the simulation apart.

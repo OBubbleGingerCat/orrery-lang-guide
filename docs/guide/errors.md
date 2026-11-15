@@ -72,9 +72,12 @@ access modes ([State and tasks](./state-and-tasks#access-modes)):
   ([Components](./components#looking-without-popping)).
 
 **The configuration** (`LoadError::Config`, with the field): a
-`delta_limit` above 62, `groups` other than 1, `workers_per_group` of 0
-or more than an L3 domain allows, and what does not run on several
-workers yet ([Workers](./running#workers)).
+`delta_limit` above 62, `groups` other than 1, `workers_per_group` of 0,
+`slots` that is not a power of two from 2 to 1024; on several threads,
+no L3 domain with a free physical core for each thread among the CPUs
+the run may use (field `cpus`), and what such a run does not take yet
+(field `parallel`) ([Threads](./running#threads)); and with `checks`, a
+model it cannot check (field `checks`).
 
 **Setting up** (`LoadError::Init`, with the stage):
 
@@ -94,8 +97,10 @@ not read, or that is of another model ([Snapshots](./snapshots#restoring)).
 
 Conflicts and cycles that only *may* happen, because events are involved,
 are warnings instead, checked when the simulation runs. The load prints
-each to stderr, `warning: ...`, unless `reports` is `Off`, and keeps them
-in its report:
+each warning to stderr, one `warning: …` line each, unless `reports` is
+`Off` (`SimConfig::reports`), and keeps them in its report: a program
+reads the same lines, without the `warning: ` in front, from
+`sim.load_report().warnings`, whatever `reports` says:
 
 ```rust
 for warning in &sim.load_report().warnings {
@@ -103,10 +108,56 @@ for warning in &sim.load_report().warnings {
 }
 ```
 
+There are three kinds:
+
+- a write conflict or an ordering cycle that may happen, because events
+  are involved; it is checked while the simulation runs, and fails the
+  run if it happens ([While it runs](#while-it-runs)):
+
+  ```text
+  possible write conflict, checked at run time: %MayConflict.on_a at top and
+  %MayConflict.on_b at top both write top.value (triggered by event top.a_out
+  and event top.b_out)
+  ```
+
+- hints, which start with `hint: `;
+- on several threads, fewer execution units than workers
+  ([Threads](./running#threads)).
+
+The last depends on the number of threads: for one model,
+`sim.load_report().warnings` may be empty on one thread and not on four.
+To assert in a test that a model has no possible conflict and no possible
+cycle, on any number of threads:
+
+```rust
+let graph = sim.model_graph();
+assert!(graph.runtime_conflicts().is_empty() && graph.blocks().is_empty());
+```
+
+## Printing an error
+
+A `main` that returns a `Result` and passes errors up with `?` prints the
+error in its `Debug` form, which is hard to read. For the message as one
+line, print it with `{}`:
+
+```rust
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let plan = orr::SimPlan::<WriteConflict>::new(None, None)?;
+    let mut sim = orr::Sim::new(plan, orr::SimConfig::default())?;
+    sim.run_until(orr::Time::ns(10))?;
+    Ok(())
+}
+```
+
 ```text
-possible write conflict, checked at run time: %MayConflict.on_a at top and
-%MayConflict.on_b at top both write top.value (triggered by event top.a_out
-and event top.b_out)
+error: write conflict: %WriteConflict.bump at top and %WriteConflict.clear at top both write top.value (both triggered by clock top.clock (1ns phase 0ps))
 ```
 
 ## While it runs
@@ -149,7 +200,7 @@ When more than one thing fails, Orrery reports the failure that comes
 first in serial order: the order in which a run that takes one task at a
 time would meet them, timepoint by timepoint and, within a timepoint, in
 a fixed order that respects the access modes. The same model with the
-same input reports the same error, whatever the number of workers.
+same input reports the same error, whatever the number of threads.
 
 - A failure that would only come after the end of a stop is not
   reported: the run ends with the stop ([Stopping](./running#stopping)).
@@ -162,22 +213,24 @@ After an error, everything that comes before the failure in serial order
 has run, and the host can read the state it left with `sim.state`. The
 failing task may have written only part of what it would have, and work
 after it may have run too: that part of the state is not specified, and
-may differ with the number of workers. Every later `run_until` and `step`
+may differ with the number of threads. Every later `run_until` and `step`
 returns an error.
 
 ## Debugging
 
 - **Step.** `sim.step()` runs one timepoint; `sim.next_timepoint()` says
   which. Inspect state with `sim.state(handle)` between steps.
-- **Check the run.** With `SimConfig { checks: true, .. }`, on one
-  worker, `sim.check_trace()` checks after a run that every two accesses
-  to the same state, at least one of them a write, ran in serial order.
-- **Compare worker counts.** For a model that runs on several workers,
-  the results of a run that ends without an error, and the error a run
-  reports, never depend on their number. A model that gives other such
-  results on another number of workers is a bug in Orrery. The state read
-  after an error may differ, as [Which error is
-  reported](#which-error-is-reported) says: that is not a bug.
+- **Check the run.** With `SimConfig { checks: true, .. }`,
+  `sim.check_trace()` checks after a run that every two accesses to the
+  same state, at least one of them a write, ran in serial order. It is
+  for tests: what it records grows with the run's length, in memory and
+  in time.
+- **Compare thread counts.** The results of a run that ends without an
+  error, and the error a run reports, never depend on the number of
+  threads. A model that gives other such results on another number of
+  threads is a bug in Orrery. The state read after an error may differ,
+  as [Which error is reported](#which-error-is-reported) says: that is
+  not a bug.
 - **Snapshot and restore.** Take snapshots in a long run and restore the
   one before the problem, with a `step` loop or more logging
   ([Snapshots](./snapshots)).

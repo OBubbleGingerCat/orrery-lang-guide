@@ -37,9 +37,9 @@ impl Leaf {}
 不带 Orrery 属性的字段是状态；除了文档注释，带其他任何属性都是错误。
 
 **可见性。** 参数和子模块必须是私有的。父模块恰好能看到直接子模块里声明为 `pub`
-的那些字段（状态、触发源、接口），更深的一层都看不到：要访问孙模块，子模块得通过自己的一个 `pub` 中继、引用或接口把它转发出来。
+的那些字段（状态、触发源、接口、常量），更深的一层都看不到：要访问孙模块，子模块得通过自己的一个 `pub` 中继、引用或接口把它转发出来。
 
-## 数组
+## 数组 {#arrays}
 
 子模块、触发源、状态、引用和接口都可以是数组：
 
@@ -54,6 +54,57 @@ workers: [Worker; orr::DynShape(worker_count)],
 - `[X; 4]`：固定长度，一个非零的字面量；
 - `[X; N]`：一个常量，可以是模块的 const 泛型参数、定义模块的地方能用到的 `const`（`CORES`、`cfg::CORES`、`<T as Trait>::N`），或者由它们算出的表达式（`2 * N`、`{ N + 1 }`）。不能用 `Self`，也不能用模块的字段。值为零是错误；
 - `[X; orr::DynShape(p)]`：同一个模块的参数 `p` 的值，每个实例各自取值。参数要直接写名字，不允许写表达式。值为零是错误。
+
+**长度是个算式时。** `DynShape` 的长度只能写一个参数的名字，所以由别的参数算出来的长度（比如缓存的 `sets` × `ways` 行）要单独做成一个参数。驱动程序把它算好，和别的参数一起写进参数文件；再在 `init` 里核一遍：文件里给错了，`SimPlan::new` 就带着 init 的那句话失败，不会建出一个不对的模型。
+
+```rust
+#[orr::module]
+pub struct Cache {
+    #[orr::param("sets", default = 64usize)]
+    sets: usize,
+    #[orr::param("ways", default = 4usize)]
+    ways: usize,
+    #[orr::param("lines, sets x ways", default = 256usize)]
+    lines: usize,
+    #[orr::trigger]
+    clock: orr::Clock,
+    #[orr::reset(u64::MAX)]
+    tags: [u64; orr::DynShape(lines)],
+    next: u64,
+}
+
+#[orr::module_impl]
+impl Cache {
+    #[orr::init]
+    fn init(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
+        let module = ctx.module();
+        if *module.sets * *module.ways != *module.lines {
+            return Err(orr::SimError::new("lines must be sets x ways"));
+        }
+        ctx.init_clock(module.clock, orr::Time::ns(1), orr::Time::ps(0))
+    }
+
+    #[orr::task(triggers = (clock,))]
+    fn fill(ctx: &mut orr::TaskCtx, tags: &mut [u64], next: &mut u64) -> Result<(), orr::SimError> {
+        let (sets, ways) = (*ctx.module().sets, *ctx.module().ways);
+        let set = *next as usize % sets;
+        let way = *next as usize / sets % ways;
+        tags[set * ways + way] = *next;
+        *next += 1;
+        Ok(())
+    }
+}
+```
+
+驱动程序从它自己的输入里读到 `sets` 和 `ways` 以后：
+
+```rust
+let params = out_dir.join("params.toml");
+std::fs::write(&params, format!("[top]\nsets = {sets}\nways = {ways}\nlines = {}\n", sets * ways))?;
+let plan = orr::SimPlan::<Cache>::new(Some(params), None)?;
+```
+
+plan 只能从文件拿参数（[运行仿真](./running)），所以驱动程序要写一个；写在这次运行的输出旁边，也顺带记下了这次运行用的是什么。
 
 状态数组的每个元素都是一个独立的位置，与其他元素分开定序。应当作为一个位置的值（总是整体取用的缓冲区）要改用 `orr::Array<T, N>`。
 
@@ -79,7 +130,7 @@ tags: [u64; orr::DynShape(depth)],
 
 没有 `#[orr::reset(..)]` 的字段，初值只用 `Default::default()` 做一次，不是每个实例做一次：每个实例、状态数组的每个元素，都从它的一份拷贝开始。大小由参数定的类型，如 `orr::Array<T, orr::DynShape(depth)>`，实例里有几种大小就做几次。所以每次调用给出不同值的 `Default`（比如从一个计数器取号），仍让每个实例从同一个值开始。要让各个实例的初值不同，用 `#[orr::reset(..)]`，像上面的 `credits` 那样从参数取。
 
-## 参数
+## 参数 {#parameters}
 
 参数有一个 `default`（必需），还可以有 `validate = f`，即一个函数
 `fn(&T) -> Result<(), orr::ParamError>`：
@@ -171,17 +222,125 @@ fn init_top(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
 | `ctx.init_clock(clock, period, phase)` | 配置一个独立的时钟，恰好一次 |
 | `ctx.init_clock_hz(clock, hz, phase)` | 同上，按以赫兹计的频率（[时钟](./time#clocks)） |
 | `ctx.clock_info(clock)` | 一个时钟的 `ClockInfo`，或者一个中继所连时钟的 |
-| `ctx.connect(source, target)` | 时钟 → 时钟中继，中继 → 中继，事件源 → 事件中继，中继 → 中继，唤醒 → 唤醒中继 |
-| `ctx.set_const(constant, value)`、`ctx.get_const(constant)` | 给一个[常量](#constants)赋值，或者读一个已经赋过值的常量 |
+| `ctx.connect(source, target)` | 时钟 → 时钟中继，事件源 → 事件中继，唤醒 → 唤醒中继，中继 → 中继 |
+| `ctx.set_const(handle, value)` / `ctx.get_const(handle)` | 设一个[常量](#constants)，恰好一次 / 读祖先或本 init 已经设好的常量 |
 | `ctx.share_state(state, reference)` | 让一个 `StateRef` 指向一个状态，或者指向另一个引用；store 和外部端口也用它 |
 | `ctx.connect_interface(&child_component, interface)` | 把一个接口绑定到一个直接子组件上 |
 | `ctx.share_interface(interface, child_interface)` | 把一个接口转发给子模块 |
 
-连接在所有 `init` 都运行完之后才解析，所以连接的先后无关紧要。`ctx.clock_info` 是例外：它只看到到目前为止已经初始化的时钟和已经连接的中继。`init` 从根往下运行，所以一个 `init` 能读它自己初始化过的时钟、祖先连接好的中继，以及它连接之后的子模块中继，但不能读子模块的 `init` 才配置的时钟。每个中继、引用和接口都必须恰好连接一次：没有连接、有两个驱动、连到一个源上，以及引用成环，都是错误。
+连接在所有 `init` 都运行完之后才解析，所以连接的先后无关紧要。`ctx.clock_info` 是例外：它只看到到目前为止已经初始化的时钟和已经连接的中继。`init` 从根往下运行，所以一个 `init` 能读它自己初始化过的时钟、祖先连接好的中继，以及它连接之后的子模块中继，但不能读子模块的 `init` 才配置的时钟。每个时钟中继、事件中继、引用和接口都必须恰好连接一次：没有连接、有两个驱动、连到一个源上，以及引用成环，都是错误。唤醒中继例外：可以接 0 个到好几个唤醒，同一个唤醒接两次才是错误。一个都不接时，没有谁能经过它打开那扇门，也没有错误提示：忘了接唤醒，那个单元关了门以后就一直睡着。一个单元莫名其妙不动了，先查它的唤醒中继接没接上。
+
+另一头什么都没有的中继（比如网格边上的路由器朝外的口）也得连上一个源。在父模块里放几个没有任何 task 发的源，把这样的中继连上去：
+
+```rust
+#[orr::module]
+pub struct Line {
+    #[orr::param("nodes", default = 4usize)]
+    count: usize,
+    #[orr::trigger]
+    clock: orr::Clock,
+    /// Never emitted: what the two ends' outward ports are connected to.
+    #[orr::trigger]
+    nothing: [orr::EventSource<u64>; 2],
+    #[orr::submodule]
+    nodes: [Node; orr::DynShape(count)],
+}
+
+// In Line's init, after each node is connected to its neighbours:
+let (first, last) = (&module.nodes[0], &module.nodes[*module.count - 1]);
+ctx.connect(module.nothing[WEST], first.inputs[WEST])?;
+ctx.connect(module.nothing[EAST], last.inputs[EAST])?;
+```
+
+没有哪个 task 的 `emits` 里有 `nothing`，所以它上面从来不发东西：这两个中继永远不触发，运行的结果和没有它们时一样。把边绕到另一边去连也能跑，可那几条链路上有没有东西走，就要看节点的代码（没有节点往边外发），读的人得自己去查；上面这样写，连接本身就说明了。
+
+这样的中继每个连一个自己的源，像上面那样放成数组。同一个 task 的两个触发不能连到同一个源上：建计划时会报"subscribes to trigger … more than once"。
 
 ## 常量 {#constants}
 
-常量是一次运行里固定不变的值，比如一个深度，或者另一个时钟的 `ClockInfo`，由某个 `init` 赋值，由 task 读取。它和状态不同，不在快照里，赋值之后也没有什么会再写它：
+参数来自参数文件。**常量**是 `init` 在建模型时算出来、task 只读的值：一个单元在模型里的位置、父模块替它选的模式、一个它不在上面跑的时钟的周期。它是标了 `#[orr::constant]` 的字段，类型可以是任何 `Send + Sync + 'static` 的类型：
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Mode {
+    Plain,
+    Doubled,
+}
+
+#[orr::module]
+pub struct Unit {
+    #[orr::trigger]
+    pub clock: orr::ClockRelay,
+    #[orr::constant]
+    pub id: u64,              // assigned by the parent
+    #[orr::constant]
+    pub mode: Mode,
+    #[orr::constant]
+    pub weights: [u64; 3],    // an array is one constant
+    #[orr::constant]
+    step: u64,                // assigned by the unit itself
+    pub sum: u64,
+}
+
+#[orr::module_impl]
+impl Unit {
+    #[orr::init]
+    fn init(ctx: &mut orr::InitCtx) -> Result<(), orr::SimError> {
+        let module = ctx.module();
+        let id = *ctx.get_const(module.id)?;   // the parent's init ran first
+        ctx.set_const(module.step, id + 1)
+    }
+
+    #[orr::task(triggers = (clock,))]
+    fn tick(
+        _ctx: &mut orr::TaskCtx,
+        mode: &'constant Mode,
+        weights: &'constant [u64; 3],
+        step: &'constant u64,
+        sum: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        let k = if *mode == Mode::Doubled { 2 } else { 1 };
+        *sum += k * (weights.iter().sum::<u64>() + *step);
+        Ok(())
+    }
+}
+
+// In the parent's init, for each child:
+for (i, unit) in module.units.iter().enumerate() {
+    ctx.connect(module.clock, unit.clock)?;
+    ctx.set_const(unit.id, i as u64)?;
+    ctx.set_const(unit.mode, if i % 2 == 0 { Mode::Plain } else { Mode::Doubled })?;
+    ctx.set_const(unit.weights, [1, 2, 3])?;
+}
+```
+
+**在哪设。** 只有 `init` 能设常量，用 `ctx.set_const(handle, value)`，而且恰好一次：
+
+- 模块设自己的常量，`pub` 的和不 `pub` 的都行。父模块设子模块 `pub` 的常量；不 `pub` 的不在子模块的视图里，父模块叫不出它的名字（编译错误："no field"）。孙模块的常量一层一层往下传，每一层的 `init` 设自己子模块的。
+- init 从根往下跑，所以模块自己的 `init` 能用 `ctx.get_const(handle)` 读到父模块设的值，再由它算出别的常量（上面的 `step`）。
+- 常量没有默认值，在常量上写 `#[orr::reset]` 是编译错误。没有哪个 `init` 设的常量、设了两次的常量，都在建计划（`SimPlan::new`）时报错，报出实例和字段："constant `core` is not assigned"、"constant `core` is assigned twice"。
+
+**task 怎么读。** task 把本模块的常量当作一个和字段同名的参数来读，写成 `&'constant T`，`T` 是字段的整个类型：
+
+- `'constant` 必须写：`mode: &Mode` 是编译错误，报错会叫你写 `&'constant T`；`&'constant mut Mode` 也是。
+- 数组是一个值：`weights: &'constant [u64; 3]` 是整个数组，不像状态数组那样每个元素是一个位置。
+- 常量不是状态。读它不会让 task 排在谁后面；它也不在快照里：从快照恢复的运行会重新跑一遍 init，由 init 重新设常量。
+
+**数组长度。** 常量不能给数组定长度：`[X; N]` 接受的是 Rust 的常量（[数组](#arrays)），`orr::DynShape(p)` 只接受同一个模块的参数，在那里写常量是编译错误（"DynShape must reference a local param"）。触发源的 `min_delay` 也不行。长度或延迟要由某个值决定时，把这个值做成参数。
+
+**参数还是常量。**
+
+| | 参数 | 常量 |
+|---|---|---|
+| 谁设 | 参数文件，或者它的默认值 | `init`，在代码里 |
+| 类型 | [参数类型](#parameters) | 任何 `Send + Sync + 'static` 的类型 |
+| 没设 | 用默认值 | 报错 |
+| 数组长度、`min_delay` | 能 | 不能 |
+| task 里怎么读 | `*ctx.module().name` | 参数 `name: &'constant T` |
+
+用户应该能为一次运行改的值，做成参数。由实例在模型里的位置决定的值（它的编号、它在第几级），或者父模块由自己的参数算出来的值，做成父模块设的常量。父模块也可以这样把自己的一个参数传下去，变成每个子模块的常量。
+
+对常量泛型的模块，也可以这样把那个数交给 task：由它自己的 `init` 设成一个常量：
 
 ```rust
 #[orr::module]
@@ -212,8 +371,6 @@ impl<const N: usize> Buffer<N> {
     }
 }
 ```
-
-常量由它所在模块或某个祖先模块的 `init` 赋值，恰好一次：赋了两次、或者从没赋值，都是 `SimPlan::new` 的错误。task 以 `&'constant T` 读取它。
 
 ## 展开 {#elaboration}
 

@@ -59,4 +59,19 @@ Gpu                       core clock (1132 MHz) and DRAM clock (850 MHz)
 - **11 个 rodinia_2.0-ft 基准**：从 8,389 个周期（heartwall）到 1,172,557 个（streamcluster），共 240 万个周期、1650 万行日志；比较统计数据，以及每 10,000
   个周期一个窗口的日志哈希。
 
-每个用例和每个基准都必须完全一致：在普通循环里，以及在 Orrery 上，用一个 worker 或多个。
+每个用例和每个基准都必须完全一致：在普通循环里，以及在 Orrery 上用任意多个线程。
+
+## 构建和运行 {#build-and-run}
+
+在 Orrery 仓库里：
+
+```sh
+cargo build --release -p gpgpu-sim-model --bin gpgpu-sim-orrery
+target/release/gpgpu-sim-orrery --trace <dir> --workers 4 > stats.log
+```
+
+- `--trace <dir>` 是一个基准的 `traces` 目录，即 Accel-Sim 的 tracer 写出的那个。
+- 统计输出到标准输出，格式和 GPGPU-Sim 的一样。标准错误的最后一行是运行的长度和用时：`<cycles> cycles in <seconds>s (…)`；这个时间包括构建仿真。
+- `--workers <n>` 用 *n* 个线程运行（[线程](../guide/running#threads)）；`--plain` 不用 Orrery，改跑普通循环。
+- `--windows <file>` 把事件日志按 10,000 拍一个窗口写成哈希，参照的日志就是这样比较的；`--log <file>` 写出完整的日志。
+- `--params <toml>` 改模型的参数，`--reports off|warnings|all` 改构建仿真和停下时打印什么（`SimConfig::reports`）。
