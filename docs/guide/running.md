@@ -212,8 +212,10 @@ Three things about the model decide it:
   helps).
 - **How much the working instances do in a cycle**, against what an
   execution unit costs. More kinds of task, and chains of events without
-  a [declared delay](./time#declared-delays), give more units. On one
-  thread a closed gate costs nothing.
+  a [declared delay](./time#declared-delays), give more units. In one
+  small model measured, seven kinds of task added to it and closed for
+  the whole run took less than a tenth more time on one thread; on 8
+  threads they took about as long as seven kinds that ran in every cycle.
 
 ### When to deal the instances out {#dealt}
 
