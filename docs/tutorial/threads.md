@@ -6,6 +6,30 @@ what to do when it does not get faster. The guide states the facts in
 [When more threads help](../guide/running#when-threads). Here they are
 rules to check in order, each with an example from this tutorial.
 
+## What a cycle costs on several threads {#what-a-cycle-costs}
+
+On several threads, a run pays for its execution units in every cycle,
+besides the work its tasks do. This is what the runs behind this
+tutorial showed:
+
+- Each kind of task that comes in many instances makes about
+  min(instances, *N* − 1) units on *N* threads, and a chain of events
+  without a delay makes more (rule 5 below). `sim.load_report().units`
+  gives the count.
+- Each unit takes time in every cycle in which anything runs, whether
+  its tasks run or not. In a small model on 8 threads, seven kinds of
+  task with their gates closed for the whole run took about as long as
+  seven kinds that ran in every cycle.
+- A cycle in which no task runs is not always skipped. In one model with
+  a sink triggered by events alone, with no clock and no gate, every
+  unit was paid for in every cycle on 8 threads, though tasks ran in
+  fewer than a quarter of them. Without the sink, each unit was paid for
+  in about a third of the cycles.
+
+So the cost of a cycle grows with the kinds of task and the threads,
+more than with the work done in it. Fewer kinds of task (rule 4 below)
+is often the first thing to try.
+
 ## Check these in order
 
 **1. Two threads are not faster than one.** A run on *N* threads has one
@@ -26,8 +50,8 @@ faster at all.
 
 **3. Each cycle must have enough work for the units it is divided into.**
 Every execution unit costs something in every cycle in which anything
-runs, whether its gates are open or not. Estimate it with the ratio *R*
-below.
+runs, whether its gates are open or not. Nothing tells in advance
+whether the work pays for that: try it (Rule 3 below).
 
 **4. Fewer kinds of task, fewer units.** Each kind of task that comes in
 many instances gives about min(instances, *N* − 1) units. So every extra
@@ -178,43 +202,33 @@ Seconds to run (rough). The execution units are 1, 1, 3 and 7:
 
 ## Rule 3: is there enough work a cycle?
 
-Run a typical stretch of input once on 1 thread. Inputs that differ
-much, a busy one and a mostly idle one say, can come out on opposite
-sides: decide for each. Then:
+No size of model and no number of execution units says in advance
+whether its work in a cycle pays for the units on several threads.
+Choose by trying, as the guide says
+([How many threads](../guide/running#how-many-threads)):
 
-1. Divide the run time (the run alone) by the cycles. That is the time a
-   cycle. If most cycles have nothing at all to do, divide by the cycles
-   that had work. To count them, run the stretch again with
-   `sim.step()` and count the `StepEnd::Executed` it returns
-   ([Running](../guide/running#how-many-threads)).
-2. Build the simulation on 8 threads and read `sim.load_report().units`.
-3. Work out *R* = time a cycle ÷ (units × 0.1 µs).
-   - At 2.5 or more, 8 threads are faster, as long as the working
-     instances are not neighbours (rule 2).
-   - Below that they may be faster or slower: measure.
+1. Take a stretch of a typical input. Run it once on 1 thread and once
+   on the most threads (the free physical cores of one cache domain),
+   and keep the faster. Compare the runs alone, not building the
+   simulation.
+2. Do it for each kind of input the model runs. A busy input and a
+   mostly idle one can come out on opposite sides: one model ran faster
+   on 8 threads than on 1 on an input with much work in every cycle, and
+   slower on one with little.
+3. Read `sim.load_report().units` on the most threads. It does not say
+   which is faster, but it helps explain the result.
 
-The examples of this tutorial, checked against this estimate (rough):
+Why several threads can be slower: every unit takes time in every cycle
+in which anything runs ([What a cycle costs](#what-a-cycle-costs)).
+When the work in a cycle is little, that costs more than running side by
+side saves. And where the work cannot be spread, more work does not
+help: a model written as one loop is one unit ([chapter 1](./measure)),
+and four neighbouring lanes with `Runs` fall into one unit (above). So check rules 1 and 2
+first.
 
-| Example | 1 thread, a cycle | units on 8 | *R* | 8 threads vs 1 |
-|---|---|---|---|---|
-| lanes, heavy work ([chapter 1](./measure)) | 121 µs | 7 | 170 | 6.0× |
-| lanes, light work (chapter 1) | 0.67 µs | 7 | 1.0 | 1.6× |
-| one loop, light work (chapter 1) | 0.59 µs | 1 | 5.9 | 0.55× |
-| stages with a delay, light work ([chapter 5](./lines)) | 3.7 µs | 14 | 2.7 | 2.4× |
-| stages without a delay, light work (chapter 5) | 4.5 µs | 56 | 0.8 | 0.97× |
-| 4 neighbouring lanes, `Runs` (above) | 7.7 µs | 7 | 11 | 0.96× |
-
-- *R* works where the work is spread over the units.
-- It says nothing where the work cannot be spread:
-  - the loop is one unit;
-  - the four neighbours are in one unit.
-  
-  Both have a high *R* and are no faster. Check rules 1 and 2 first.
-- Many identical units with very little work each can be faster at a low
-  *R*, as the light lanes are. The 0.1 µs is rough, and the true cost per
-  unit was lower in these small models (about 0.06 µs). It varies with
-  the model and the machine. Your own floor is the lowest you measure for
-  8 threads' time a cycle ÷ units.
+As a rule, a small model, or one with little work in each cycle, runs on
+1 thread. Several threads pay off on large runs: many instances, each
+with much to do in a cycle.
 
 ## Configuration
 
@@ -243,9 +257,10 @@ Go through what you can see from outside:
    without a delay.
 2. **Your own counts**: in a typical cycle, how many instances work,
    and which ones? Are they neighbours? Then try `Dealt`.
-3. **The time a cycle on 1 thread**, against the units (*R*). If *R* is
-   low, the work a cycle is too little for that many units. Fewer units
-   (rules 4 and 5), or fewer threads, is then the answer.
+3. **The run on 1 thread against the most.** If the most threads are
+   slower although the work is spread (rules 1 and 2), the work in a
+   cycle is too little for that many units. Fewer units (rules 4 and 5),
+   or 1 thread, is then the answer.
 4. **The stop report** (`reports: orr::Reports::All`) gives the run's
    wall time, and on several threads how the work was shared out.
 
@@ -260,11 +275,10 @@ threads would pay for that. So pick one thread count for a whole run.
 
 - In a typical cycle, how many instances work? Are they neighbours? Did
   I try `Dealt`?
-- What is *R* on 8 threads? How many execution units are there on 1, 2,
-  4 and 8 threads?
+- How many execution units are there on 1, 2, 4 and 8 threads?
 - Is there a kind of task that runs, or keeps its gate closed, in every
   cycle while doing almost nothing? (On several threads it is paid for
   either way.)
 - Do the lines that have a delay in the hardware declare it?
-- Did I run 1 thread and the most once each, comparing the run alone,
-  and skip 2?
+- Did I run 1 thread and the most once each, on each kind of input,
+  comparing the run alone, and skip 2?

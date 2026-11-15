@@ -177,7 +177,21 @@ When the run ends on a condition the whole model holds (every packet has
 arrived), the driver can call `run_until` in slices of some thousands of
 cycles and check the condition between them; a task that returns
 `orr::Stop` would have to see the whole condition itself (guide:
-[Stopping](../guide/running#stopping)).
+[Stopping](../guide/running#stopping)). How long a slice is matters both
+ways:
+
+- every call costs something, more on several threads: calls every few
+  cycles made runs up to a fifth longer even with CPUs to spare, and
+  much longer when the process had none to spare (guide:
+  [Threads](../guide/running#threads));
+- the run goes on to the end of the slice in which the condition came
+  true, so where it stopped is not when the last packet arrived. When
+  the result includes that time, have the model keep it in its state,
+  written by the task that sees the last arrival.
+
+Slices of some thousands of cycles keep the calls rare and the overrun
+short.
+
 Time on a machine with at least 8 free cores: a run on 8 threads takes 8
 of them, and other work on those cores slows it unevenly.
 
