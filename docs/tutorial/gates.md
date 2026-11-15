@@ -198,15 +198,17 @@ Seconds to run (rough). The execution units are 2, 2, 4 and 8 on 1, 2,
   - 8 threads are 1.12 times as fast;
   - no thread count is slower.
   
-  On 8 threads it is faster, but the speedup falls from 3.0 to 2.3. On
-  one thread a closed gate costs nothing. On several threads, though,
-  every execution unit pays a share in every cycle where anything runs,
-  however many of its units are closed. So the gate saves more of 1
-  thread's time than of 8 threads'. That is how it should be: compare the
-  times, not the speedups.
-- **Busy all the time.** Closing the gate saves nothing and costs nothing
-  (within noise on every thread count). Here a worker's gate never closes
-  after its first job: the next job comes in the cycle the last one ends.
+  On 8 threads it is faster, but the speedup falls from 3.0 to 2.3. In
+  this example closing the gate took a third off the time on one thread,
+  and a ninth on 8 threads. On several threads, though, an execution unit
+  takes time in every cycle where anything runs, even when the gates of
+  all its workers are closed. So the gate saves more of 1 thread's time
+  than of 8 threads'. That is how it should be: compare the times, not
+  the speedups.
+- **Busy all the time.** In this example closing the gate saves nothing
+  and costs nothing (within noise on every thread count). Here a worker's
+  gate never closes after its first job: the next job comes in the cycle
+  the last one ends.
   A gate that closes and opens again often does cost; see
   [When not to](#when-not-to).
 - **Reading** gains two things to keep in mind:
