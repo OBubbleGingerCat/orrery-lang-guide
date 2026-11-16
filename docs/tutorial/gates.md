@@ -231,6 +231,112 @@ units. An L2 bank, for example, is two tasks:
 
 Neither step writes `open()`: a closed step is opened only by a wake.
 
+## Steps that share a gate {#shared-gate}
+
+A unit often runs in steps, at several levels of one clock: fetch,
+execute, retire. With no work, all the steps should sleep; with work,
+all should wake. Such steps share one gate: their `triggers` name one
+clock field with `gate = gate`. Only one task may write the gate, here
+`retire`, at the last level, which takes the jobs too. This chapter's
+worker, split into three steps, each job's event carrying its cycles of
+work:
+
+```rust
+#[orr::module]
+pub struct Worker {
+    #[orr::trigger(gate = gate)]
+    pub clock: orr::ClockRelay,
+    /// Jobs, each its cycles of work: not behind the gate.
+    #[orr::trigger]
+    pub jobs: orr::EventRelay<u64>,
+    #[orr::constant]
+    pub gating: bool,
+    gate: orr::Gate,
+    /// Cycles of work left on the jobs taken so far.
+    left: u64,
+    pub fetched: u64,
+    pub executed: u64,
+}
+
+#[orr::module_impl]
+impl Worker {
+    /// Level 0: fetches, while there is work.
+    #[orr::task(triggers = (clock,))]
+    fn fetch(
+        _ctx: &mut orr::TaskCtx,
+        left: &u64,
+        fetched: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if *left > 0 {
+            *fetched = mix(*fetched, *left);
+        }
+        Ok(())
+    }
+
+    /// Level 1: executes what was fetched.
+    #[orr::task(triggers = (clock + delta(1),))]
+    fn execute(
+        _ctx: &mut orr::TaskCtx,
+        left: &u64,
+        fetched: &u64,
+        executed: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if *left > 0 {
+            *executed = mix(*executed, *fetched);
+        }
+        Ok(())
+    }
+
+    /// Level 2: retires a cycle of work, takes the jobs, and closes
+    /// the gate when no work is left: the gate's one writer.
+    #[orr::task(triggers = (clock + delta(2), jobs))]
+    fn retire(
+        ctx: &mut orr::TaskCtx,
+        gating: &'constant bool,
+        gate: &mut orr::Gate,
+        left: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        let (clock, job) = ctx.triggered_triggers();
+        if clock.is_some() && *left > 0 {
+            *left -= 1;
+        }
+        if let Some(job) = job {
+            *left += *job;
+        }
+        if *gating {
+            if *left == 0 {
+                gate.close(); // until the next job
+            } else if !gate.is_open() {
+                gate.open(); // a job came while it was closed
+            }
+        }
+        Ok(())
+    }
+}
+```
+
+- `retire` closes the gate at the last level (level 2), so it is closed
+  from the next edge: all three steps have run at the edge where it
+  closes. A writer at the first level would stop the later levels at
+  once, at the same edge.
+- A job is an ungated event that arrives at level 0 of an edge.
+  `retire` opens the gate there, and it is open from level 1: `execute`
+  and `retire` run at that edge, `fetch` from the next. With the gate
+  never closing it is the same: `fetch` reads `left` as `&u64`, before
+  `retire` writes it at the same timepoint, and reads 0.
+- `gate.gated_edges()` has three counts, in the order of the tasks'
+  names: `execute`, `fetch`, `retire`. `fetch`'s is larger than the
+  other two: at the edges where a job arrived and the gate opened from
+  level 1, level 0 was still closed.
+- Check with gating off: with `gating` `false` the gate never closes.
+  Both ways were run, and the three workers' state is the same.
+
+A gate used to control one task only. Such a unit needed three
+`ClockRelay` fields and three gates, each step closing its own, and the
+jobs connected to all three steps, each opening its own gate. Now one
+gate and one writer do. Steps that are to sleep and wake apart still
+want gates of their own.
+
 ## When not to
 
 - **A unit that is almost always busy** gains nothing from a gate, and
@@ -266,6 +372,8 @@ Neither step writes `open()`: a closed step is opened only by a wake.
 ## Checklist
 
 - Can I say in one sentence when each gate closes?
+- Of a gate several steps share, does one task write it? Is it at the
+  last level?
 - Does every way work can reach the unit open its gate? (An ungated
   event, or a wake from each sender: chapter 4's table.)
 - With the gate never closing, are the results the same, at the same

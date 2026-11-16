@@ -200,7 +200,8 @@ closing it and waiting to be woken: no other unit has to send the wake, or
 work out how many edges ahead to send it.
 
 - A write takes effect from the next timepoint. Within the timepoint the
-  gate keeps the value the triggers saw, which `is_open()` reports.
+  gate keeps the value the triggers saw, which `is_open()` reports (but
+  to a `&'latest orr::Gate` reader, below).
 - `close_until(t)` opens the gate at `t`: events that arrive at `t` or
   later pass, and the clock runs again from its first edge at or after
   `t`. `t` need not be an edge. `orr::Timepoint::at(ps)` is delta 0 of a
@@ -212,20 +213,61 @@ work out how many edges ahead to send it.
   (`Timepoint::ZERO` when open, `Timepoint::MAX` when closed).
 - `gate.gated_edges()` counts the edges at which the gate was closed, up
   to and including now: one count per clock the gated triggers name, in
-  the order they are declared. It is what power or utilisation statistics
-  need.
+  the order they are declared. Of a gate that controls several tasks, the
+  tasks come in the order of their names (the order the macros give a
+  module's tasks, which is the program's order of tasks), each task's
+  counts in the order of its triggers; a clock named at several levels
+  has a count for each, each at its level. It is what power or
+  utilisation statistics need.
 
-A gate, its triggers and the task that writes it belong together:
+A gate belongs to its module instance, not to a trigger or to a task:
 
 - the gate is a scalar state field of the module itself, of type
   `orr::Gate`;
-- a gate controls the triggers of one task, and a task's gated triggers
-  share one gate;
-- only that task writes the gate; other tasks may read it.
+- a task's gated triggers share one gate; a gate may control the
+  triggers of several tasks of the instance: their `triggers` name one
+  field with `gate = g`, or several fields each say `gate = g`;
+- one task at most writes the gate (takes `&mut orr::Gate`): one of the
+  tasks it controls, or another task of the module;
+- other tasks may read it, but for a gate a task wakes ([Wakes](#wakes)):
+  only the tasks it controls and its writer read that one.
 
-The macros and `SimPlan::new` check these. So two tasks of one module
-that close gates of their own need a trigger field each: two `ClockRelay`
-fields, each with its own `gate = ..`, both connected to the same clock.
+The macros and `SimPlan::new` check these. While the gate is closed,
+none of the tasks it controls runs on a gated trigger. Give tasks gates
+of their own when they are to sleep and wake apart: several `ClockRelay`
+fields, each with its own `gate = ..`, all connected to the same clock.
+Tasks that have nothing to do with each other and should run in parallel
+want gates of their own too: the tasks a gate controls and its writer
+are in one executor unit, and run one after another.
+
+When a gate controls several tasks:
+
+- The levels of one clock are different timepoints
+  ([Delta cycles](#delta-cycles)). A writer that closes the gate at level
+  0 of edge e stops the levels it controls from level 1 of that edge on;
+  one that closes it at the last level it controls stops them all from
+  the next edge. To decide once per edge, run the writer at the last
+  level.
+- `close_until(t)`: each gated clock runs again from its first point at
+  or after `t`, each at its level; events pass from `t` on.
+- Reading the gate in a task's body: `&orr::Gate`, and the writer's
+  `&mut orr::Gate`, take the value as the timepoint begins, the one the
+  gated triggers saw; `&'latest orr::Gate` takes it after the writer's
+  write at the timepoint, which may differ: if the writer closed the
+  gate, the triggers fired and yet the `&'latest` reader's `is_open()` is
+  `false`. A task the gate controls that asks whether the gate is open
+  at the timepoint takes `&orr::Gate`. `gated_edges()` is the same to the
+  writer and to every reader.
+- A writer that closes the gate at the last level of edge e, and writes
+  it only there, makes every level count the same edges. An ungated
+  event that makes the writer open the gate at level 0 of edge e opens it
+  from level 1: the count of level 0 has that edge more.
+- `sim.dropped_events()` lists by instance, task and trigger as before:
+  an event that two gated tasks subscribe to, arriving while the gate is
+  closed, is dropped once at each of their triggers.
+- A writer that runs on a clock the gate does not control runs every
+  cycle: a closed gate does not spare the unit its cycles. Make the
+  writer one of the tasks the gate controls, or one an event triggers.
 
 The `&mut orr::Gate` a task takes is the gate itself, for the call. No
 gate is made outside the simulation, so a task cannot move the one it
@@ -328,9 +370,12 @@ impl Producer {
 - `wake()` opens the gate from the next timepoint: a closed unit runs
   again at its gated clocks' first edge after now. Several wakes of one
   gate at one timepoint are one.
-- A wake wins over a `close()` that the gate's own task writes at the
-  same timepoint. Above, the consumer may find its FIFO empty and close in
-  the very cycle the producer pushes and wakes it; the gate stays open.
+- A wake wins over a `close()` that the gate's writer writes at the same
+  timepoint. Above, the consumer may find its FIFO empty and close in the
+  very cycle the producer pushes and wakes it; the gate stays open.
+- Of a gate that controls several tasks, a wake wakes them all: each
+  gated trigger runs again from its first point after the gate opens,
+  each at its level.
 - `wake_after(delay)` opens the gate from its first edge at or after
   now + `delay` (`orr::Time::DELTA` or a positive time). It takes effect
   just before then: it wins over every `close()` written before, and a
@@ -379,6 +424,18 @@ match ctx.now().ps() {
 Both gates open just before 2 ns, and both units close them again when
 they run there. Unit 0's stays closed; unit 1's opens again from the next
 timepoint, by the `wake()` at 2 ns.
+
+A wake and the writer's `close()` go in the same order whether the gate
+controls one task or several:
+
+| Case | Result |
+|---|---|
+| The writer calls `close()` at timepoint τ, and a `wake()` comes at τ | The gate is open from the timepoint after τ (the wake wins) |
+| `wake()` at τ; the writer calls `close()` at τ′, the timepoint after τ | The gate is open at τ′, where its tasks run; closed from the timepoint after τ′ (`close()` wins) |
+| `wake()` at level 0 of edge e; gated tasks at levels 1 to 5 of that edge | Open from level 1: the later levels of the edge run |
+| `wake_after(d)` at τ; the writer calls `close()` before τ + d | The wake wins: the gate opens from its first point at or after τ + d |
+| `wake_after(d)` at τ; the writer calls `close()` at τ + d or later | `close()` wins |
+| Several tasks wake one gate at one timepoint | One wake |
 
 **Who acts first decides whether a wake is in time.** A wake cannot make
 the woken task run in the timepoint that sends it. Whether that matters
