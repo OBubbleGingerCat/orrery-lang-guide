@@ -217,8 +217,10 @@ work out how many edges ahead to send it.
   tasks come in the order of their names (the order the macros give a
   module's tasks, which is the program's order of tasks), each task's
   counts in the order of its triggers; a clock named at several levels
-  has a count for each, each at its level. It is what power or
-  utilisation statistics need.
+  has a count for each, each at its level. That order is the Rust front
+  end's; a program written as IR text has its tasks in the order its
+  `task` entries appear in the text. It is what power or utilisation
+  statistics need.
 
 A gate belongs to its module instance, not to a trigger or to a task:
 
