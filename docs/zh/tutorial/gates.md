@@ -201,6 +201,91 @@ fn main() -> Res<()> {
 
 两步都不写 `open()`：关着的那一步只靠叫醒打开。
 
+## 几步共一扇门 {#shared-gate}
+
+一个单元常常分几步，在同一个时钟的几个级上跑：取、执行、退出。没活时几步都该睡，有活时都该醒。这几步就共一扇门：几个 task 的 `triggers` 用同一个带 `gate = gate` 的时钟字段。写门的只能有一个 task，这里是最后一级的 `retire`，它也收活。下面是本章的工人分成三步的样子，一份活的事件带着它要做几拍：
+
+```rust
+#[orr::module]
+pub struct Worker {
+    #[orr::trigger(gate = gate)]
+    pub clock: orr::ClockRelay,
+    /// Jobs, each its cycles of work: not behind the gate.
+    #[orr::trigger]
+    pub jobs: orr::EventRelay<u64>,
+    #[orr::constant]
+    pub gating: bool,
+    gate: orr::Gate,
+    /// Cycles of work left on the jobs taken so far.
+    left: u64,
+    pub fetched: u64,
+    pub executed: u64,
+}
+
+#[orr::module_impl]
+impl Worker {
+    /// Level 0: fetches, while there is work.
+    #[orr::task(triggers = (clock,))]
+    fn fetch(
+        _ctx: &mut orr::TaskCtx,
+        left: &u64,
+        fetched: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if *left > 0 {
+            *fetched = mix(*fetched, *left);
+        }
+        Ok(())
+    }
+
+    /// Level 1: executes what was fetched.
+    #[orr::task(triggers = (clock + delta(1),))]
+    fn execute(
+        _ctx: &mut orr::TaskCtx,
+        left: &u64,
+        fetched: &u64,
+        executed: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        if *left > 0 {
+            *executed = mix(*executed, *fetched);
+        }
+        Ok(())
+    }
+
+    /// Level 2: retires a cycle of work, takes the jobs, and closes
+    /// the gate when no work is left: the gate's one writer.
+    #[orr::task(triggers = (clock + delta(2), jobs))]
+    fn retire(
+        ctx: &mut orr::TaskCtx,
+        gating: &'constant bool,
+        gate: &mut orr::Gate,
+        left: &mut u64,
+    ) -> Result<(), orr::SimError> {
+        let (clock, job) = ctx.triggered_triggers();
+        if clock.is_some() && *left > 0 {
+            *left -= 1;
+        }
+        if let Some(job) = job {
+            *left += *job;
+        }
+        if *gating {
+            if *left == 0 {
+                gate.close(); // until the next job
+            } else if !gate.is_open() {
+                gate.open(); // a job came while it was closed
+            }
+        }
+        Ok(())
+    }
+}
+```
+
+- `retire` 在最后一级（δ2）关门，门从下一个沿起关：关门的那个沿上三步都跑完了。写门的 task 在第一级关门的话，同一个沿后面几级马上就不跑了。
+- 活是不在门后的事件，在沿的 δ0 送到。`retire` 在那里开门，门从 δ1 起开：这个沿上 `execute` 和 `retire` 就跑，`fetch` 从下一个沿起跑。门从不关时也一样：`fetch` 用 `&u64` 读 `left`，排在同一个时刻点 `retire` 的写之前，读到的是 0。
+- `gate.gated_edges()` 有三项，按 task 名排：`execute`、`fetch`、`retire`。`fetch` 那一项比另外两项多：活在沿上送到、门从 δ1 起开的那些沿，δ0 还关着。
+- 关掉门控来核对：`gating` 为 `false` 时门从不关。两种写法都跑过，三个工人的状态一样。
+
+以前一扇门只能管一个 task。这样的单元要三个 `ClockRelay` 字段、三扇门，每一步关自己的门，收活的事件也要接到三步上，各开各的门。现在一扇门、一个写者就够了。几步要各自睡、各自醒时，仍然各用各的门。
+
 ## 什么时候不该这样写 {#when-not-to}
 
 - **几乎一直在忙的单元**，关门没得省，还可能赔。门省下的是它跳过的调用；关一次门、再开一次，约花一到两次调用的钱。本章的工人，每 *k* 拍来一份一拍的活（每关一次门省 *k* − 2 次调用），和门一直开着比，1 线程上：*k* = 2、3 时关门略赔，4 时略赚，6 起明显赚。一个路由器网格，缓冲空了就关门，在忙的流量上 1 线程比门一直开着慢 13–16%。
@@ -211,6 +296,7 @@ fn main() -> Res<()> {
 ## 核对单
 
 - 每扇门在什么条件下关，能用一句话说出来吗？
+- 一扇门管几步时，写门的只有一个 task 吗？它在最后一级吗？
 - 活能送到这个单元的每一条路，都会打开它的门吗？（不在门后的事件，或每个送的一方都叫醒它：见第 4 章的表。）
 - 门从不关时，结果一样吗？在同样的拍上吗？测试开了 `fail_on_drop` 吗？
 - 四个线程数都量了有门和完全没有门两种吗（不只是门一直开着）？
