@@ -65,7 +65,21 @@ workers: [Worker; orr::DynShape(worker_count)],
   module. Zero is an error;
 - `[X; orr::DynShape(p)]`: the value of parameter `p` of the same module,
   per instance. The parameter is named directly; expressions are not
-  allowed. Zero is an error.
+  allowed. Zero is allowed: an array of no elements.
+
+An array whose length is a parameter of 0 or 1 is how a model has an
+optional part; there is no other syntax for one. A parameter of 0 leaves
+the part out, and 1 puts it in:
+
+```rust
+#[orr::param("whether the core has a cache: 0 or 1", default = 1)]
+caches: usize,
+
+#[orr::submodule]
+cache: [Cache; orr::DynShape(caches)],
+```
+
+A task that takes a state array of no elements gets an empty slice.
 
 **A length that is a formula.** A `DynShape` length names one parameter,
 so a length that follows from others, the `sets` × `ways` lines of a cache
