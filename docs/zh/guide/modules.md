@@ -53,7 +53,19 @@ workers: [Worker; orr::DynShape(worker_count)],
 
 - `[X; 4]`：固定长度，一个非零的字面量；
 - `[X; N]`：一个常量，可以是模块的 const 泛型参数、定义模块的地方能用到的 `const`（`CORES`、`cfg::CORES`、`<T as Trait>::N`），或者由它们算出的表达式（`2 * N`、`{ N + 1 }`）。不能用 `Self`，也不能用模块的字段。值为零是错误；
-- `[X; orr::DynShape(p)]`：同一个模块的参数 `p` 的值，每个实例各自取值。参数要直接写名字，不允许写表达式。值为零是错误。
+- `[X; orr::DynShape(p)]`：同一个模块的参数 `p` 的值，每个实例各自取值。参数要直接写名字，不允许写表达式。值可以是零，就是一个没有元素的数组。
+
+可选的部分就写成长度是参数、取 0 或 1 的数组，没有另外的写法。参数给 0 就没有这一部分，给 1 就有：
+
+```rust
+#[orr::param("whether the core has a cache: 0 or 1", default = 1)]
+caches: usize,
+
+#[orr::submodule]
+cache: [Cache; orr::DynShape(caches)],
+```
+
+任务整个拿一个没有元素的状态数组，拿到的是一个空切片。
 
 **长度是个算式时。** `DynShape` 的长度只能写一个参数的名字，所以由别的参数算出来的长度（比如缓存的 `sets` × `ways` 行）要单独做成一个参数。驱动程序把它算好，和别的参数一起写进参数文件；再在 `init` 里核一遍：文件里给错了，`SimPlan::new` 就带着 init 的那句话失败，不会建出一个不对的模型。
 

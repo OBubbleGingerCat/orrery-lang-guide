@@ -25,8 +25,8 @@ The compiler rejects:
   `top.x is not a parameter`;
 - a value of the wrong type, or a failed `validate`:
   `top.limits: validation failed: ...`;
-- a `DynShape` length of zero:
-  `top.n: dynamic shape must be greater than zero`.
+- a negative `DynShape` length:
+  `top.n: shape is negative or exceeds usize`.
 
 **Connections**
 - a relay, reference or interface never connected:

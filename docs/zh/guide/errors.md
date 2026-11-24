@@ -20,8 +20,8 @@
   `top.x is not a parameter`；
 - 类型不对的值，或者 `validate` 失败：
   `top.limits: validation failed: ...`；
-- `DynShape` 的长度为零：
-  `top.n: dynamic shape must be greater than zero`。
+- `DynShape` 的长度为负数：
+  `top.n: shape is negative or exceeds usize`。
 
 **连接**
 - 从未连接的中继、引用或接口：
